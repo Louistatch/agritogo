@@ -1,0 +1,8 @@
+{% for conv in conversations %}
+<div class="msg msg-{{ conv.role }}">
+    <span class="msg-role">
+        {{ "AgriTogo" if conv.role == "agent" else "You" if conv.role == "user" else "Engine" }}
+    </span>
+    <div class="response-body">{{ conv.contenu }}</div>
+</div>
+{% endfor %}

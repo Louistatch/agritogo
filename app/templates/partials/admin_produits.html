@@ -1,0 +1,15 @@
+{% if msg %}<div class="admin-msg">{{ msg }}</div>{% endif %}
+<table>
+    <thead><tr><th>ID</th><th>Nom</th><th>Unité</th><th>Catégorie</th><th>Action</th></tr></thead>
+    <tbody>
+    {% for p in produits %}
+    <tr>
+        <td>{{ p.id }}</td>
+        <td>{{ p.nom }}</td>
+        <td>{{ p.unite }}</td>
+        <td>{{ p.categorie }}</td>
+        <td><button hx-delete="/admin/produit/delete/{{ p.id }}" hx-target="#admin-produits" hx-swap="innerHTML" hx-confirm="Supprimer {{ p.nom }} ?" class="btn-danger">🗑</button></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>

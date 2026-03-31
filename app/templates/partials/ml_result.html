@@ -1,0 +1,158 @@
+<div class="ml-result">
+    <h3>{{ title }}</h3>
+
+    {% if module == "crop_yield" %}
+    <div class="metrics-grid">
+        <div class="metric-card-sm"><span class="metric-label">Crop</span><span class="metric-value">{{ result.crop }}</span></div>
+        <div class="metric-card-sm"><span class="metric-label">Avg Yield</span><span class="metric-value">{{ result.avg_yield_t_ha }} t/ha</span></div>
+        <div class="metric-card-sm"><span class="metric-label">RF R2</span><span class="metric-value">{{ result.metrics.random_forest.r2 }}</span></div>
+        <div class="metric-card-sm"><span class="metric-label">XGBoost R2</span><span class="metric-value">{{ result.metrics.xgboost.r2 }}</span></div>
+        <div class="metric-card-sm"><span class="metric-label">Observations</span><span class="metric-value">{{ result.n_observations }}</span></div>
+    </div>
+    {% if result.region_yields %}
+    <h4>{{ t.yield_by_region }} (hg/ha)</h4>
+    {% for region, yld in result.region_yields.items() %}
+    <div class="bar-row"><span class="bar-label">{{ region }}</span><div class="bar" style="width:{{ (yld / 500)|int }}px"></div><span class="bar-val">{{ yld }}</span></div>
+    {% endfor %}
+    {% endif %}
+    <h4>Feature Importance</h4>
+    {% for f in result.feature_importance %}
+    <div class="bar-row"><span class="bar-label">{{ f.feature }}</span><div class="bar" style="width:{{ (f.score * 300)|int }}px"></div><span class="bar-val">{{ f.score }}</span></div>
+    {% endfor %}
+    <p class="summary">{{ result.summary }}</p>
+
+    {% elif module == "garch" %}
+    <div class="metrics-grid">
+        <div class="metric-card-sm"><span class="metric-label">Last Price</span><span class="metric-value">{{ result.last_price_fcfa }} FCFA</span></div>
+        <div class="metric-card-sm"><span class="metric-label">Current Volatility</span><span class="metric-value">{{ "%.2f"|format(result.historical_volatility_stats.current * 100) }}%</span></div>
+    </div>
+    <h4>{{ result.forecast_30d|length }}-Day Forecast</h4>
+    <table><thead><tr><th>{{ t.get("col_date", "Date") }}</th><th>{{ t.get("col_volatility", "Volatility") }}</th><th>{{ t.get("col_price_range", "Price Range") }}</th></tr></thead><tbody>
+    {% for f in result.forecast_30d[:10] %}
+    <tr><td>{{ f.date }}</td><td class="mono">{{ "%.4f"|format(f.predicted_volatility) }}</td><td class="mono">{{ f.price_lower }} - {{ f.price_upper }} FCFA</td></tr>
+    {% endfor %}
+    </tbody></table>
+    <p class="summary">{{ result.summary }}</p>
+
+    {% elif module == "risk" %}
+    <div class="metrics-grid">
+        <div class="metric-card-sm"><span class="metric-label">Accuracy</span><span class="metric-value">{{ result.metrics.accuracy }}</span></div>
+        <div class="metric-card-sm"><span class="metric-label">F1-Score</span><span class="metric-value">{{ result.metrics.f1 }}</span></div>
+        <div class="metric-card-sm"><span class="metric-label">Total Dossiers</span><span class="metric-value">{{ result.total_dossiers }}</span></div>
+        <div class="metric-card-sm"><span class="metric-label">Riskiest Region</span><span class="metric-value" style="color:var(--red)">{{ result.riskiest_region }}</span></div>
+        <div class="metric-card-sm"><span class="metric-label">Safest Region</span><span class="metric-value" style="color:var(--green)">{{ result.safest_region }}</span></div>
+    </div>
+
+    <h4>{{ t.risk_by_region }}</h4>
+    <table>
+        <thead><tr><th>{{ t.get("col_region", "Region") }}</th><th>{{ t.get("col_dossiers", "Dossiers") }}</th><th>{{ t.get("col_high_risk", "High Risk") }} %</th><th>{{ t.get("col_medium", "Medium") }} %</th><th>{{ t.get("col_low", "Low") }} %</th><th>{{ t.get("col_avg_loan", "Avg Loan") }} (FCFA)</th><th>{{ t.get("col_risk_score", "Risk Score") }}</th></tr></thead>
+        <tbody>
+        {% for region, d in result.risk_by_region.items() %}
+        <tr>
+            <td>{{ region }}</td>
+            <td class="mono right">{{ d.total }}</td>
+            <td class="mono right red">{{ d.high_pct }}%</td>
+            <td class="mono right amber">{{ d.medium_pct }}%</td>
+            <td class="mono right green">{{ d.low_pct }}%</td>
+            <td class="mono right">{{ "{:,}".format(d.avg_loan_fcfa) }}</td>
+            <td class="mono right">{{ d.avg_risk_score }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {% if result.risk_by_size %}
+    <h4>{{ t.risk_by_size }}</h4>
+    <table>
+        <thead><tr><th>{{ t.get("col_size", "Size") }}</th><th>{{ t.get("col_dossiers", "Dossiers") }}</th><th>{{ t.get("col_high_risk", "High Risk") }} %</th><th>{{ t.get("col_avg_loan", "Avg Loan") }} (FCFA)</th><th>{{ t.get("col_risk_score", "Risk Score") }}</th></tr></thead>
+        <tbody>
+        {% for size, d in result.risk_by_size.items() %}
+        <tr>
+            <td>{{ size }}</td>
+            <td class="mono right">{{ d.total }}</td>
+            <td class="mono right red">{{ d.high_pct }}%</td>
+            <td class="mono right">{{ "{:,}".format(d.avg_loan_fcfa) }}</td>
+            <td class="mono right">{{ d.avg_risk_score }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <h4>{{ t.key_risk_factors }}</h4>
+    {% for f in result.feature_importance %}
+    <div class="bar-row"><span class="bar-label">{{ f.feature }}</span><div class="bar bar-high" style="width:{{ (f.score * 300)|int }}px"></div><span class="bar-val">{{ f.score }}</span></div>
+    {% endfor %}
+    <p class="summary">{{ result.summary }}</p>
+
+    {% elif module == "segmentation" %}
+    <div class="metrics-grid">
+        <div class="metric-card-sm"><span class="metric-label">Total Farmers</span><span class="metric-value">{{ "{:,}".format(result.total_farmers) }}</span></div>
+        <div class="metric-card-sm"><span class="metric-label">Segments</span><span class="metric-value">{{ result.n_clusters }}</span></div>
+        <div class="metric-card-sm"><span class="metric-label">PCA Variance</span><span class="metric-value">{{ "%.1f"|format((result.explained_variance[0] + result.explained_variance[1]) * 100) }}%</span></div>
+    </div>
+
+    <h4>{{ t.segment_profiles }}</h4>
+    <table>
+        <thead><tr><th>{{ t.get("col_segment", "Segment") }}</th><th>{{ t.get("col_farmers", "Farmers") }}</th><th>%</th><th>{{ t.get("col_avg_farm", "Avg Farm (ha)") }}</th><th>{{ t.get("col_revenue", "Revenue") }} (FCFA)</th><th>{{ t.get("col_costs", "Costs") }} (FCFA)</th><th>{{ t.get("col_margin", "Margin") }}</th><th>{{ t.get("col_climate_risk", "Climate Risk") }}</th><th>{{ t.get("col_top_region", "Top Region") }}</th></tr></thead>
+        <tbody>
+        {% for p in result.cluster_profiles %}
+        <tr>
+            <td style="font-weight:600">{% if lang == "fr" %}{% if p.name == "Subsistence Smallholders" %}Petits exploitants{% elif p.name == "Emerging Commercial" %}Commerciaux emergents{% elif p.name == "Intensive Producers" %}Producteurs intensifs{% elif p.name == "Large Diversified" %}Grands diversifies{% else %}{{ p.name }}{% endif %}{% else %}{{ p.name }}{% endif %}</td>
+            <td class="mono right">{{ "{:,}".format(p.count) }}</td>
+            <td class="mono right">{{ p.pct }}%</td>
+            <td class="mono right">{{ p.avg_farm_size_ha }}</td>
+            <td class="mono right">{{ "{:,}".format(p.avg_revenue_fcfa) }}</td>
+            <td class="mono right">{{ "{:,}".format(p.avg_input_costs_fcfa) }}</td>
+            <td class="mono right {{ 'green' if p.profit_margin_pct > 50 else 'amber' if p.profit_margin_pct > 20 else 'red' }}">{{ p.profit_margin_pct }}%</td>
+            <td class="mono right {{ 'red' if p.avg_climate_risk > 60 else 'amber' if p.avg_climate_risk > 30 else 'green' }}">{{ p.avg_climate_risk }}</td>
+            <td>{{ p.top_region }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <h4>{{ t.regional_dist }}</h4>
+    <table>
+        <thead><tr><th>{{ t.get("col_region", "Region") }}</th><th>{{ t.get("col_farmers", "Farmers") }}</th><th>{{ t.get("col_dominant_seg", "Dominant Segment") }}</th><th>{{ t.get("col_avg_revenue", "Avg Revenue") }}</th><th>{{ t.get("col_avg_farm", "Avg Farm (ha)") }}</th><th>{{ t.get("col_climate_risk", "Climate Risk") }}</th></tr></thead>
+        <tbody>
+        {% for region, d in result.region_summary.items() %}
+        <tr>
+            <td>{{ region }}</td>
+            <td class="mono right">{{ "{:,}".format(d.total_farmers) }}</td>
+            <td>{{ d.dominant_segment }}</td>
+            <td class="mono right">{{ "{:,}".format(d.avg_revenue_fcfa) }}</td>
+            <td class="mono right">{{ d.avg_farm_size }}</td>
+            <td class="mono right {{ 'red' if d.avg_climate_risk > 60 else 'amber' if d.avg_climate_risk > 30 else 'green' }}">{{ d.avg_climate_risk }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <p class="summary">{{ result.summary }}</p>
+
+    {% elif module == "kpi" %}
+    <div class="metrics-grid">
+        <div class="metric-card-sm"><span class="metric-label">Total Area</span><span class="metric-value">{{ "{:,}".format(result.national_summary.total_cultivated_ha) }} ha</span></div>
+        <div class="metric-card-sm"><span class="metric-label">Avg Yield</span><span class="metric-value">{{ result.national_summary.avg_national_yield }} kg/ha</span></div>
+        <div class="metric-card-sm"><span class="metric-label">Input Cost/ha</span><span class="metric-value">{{ "{:,}".format(result.national_summary.total_input_cost_ha) }} FCFA</span></div>
+    </div>
+    <h4>{{ t.top_crops_roi }}</h4>
+    <table><thead><tr><th>{{ t.get("col_crop", "Crop") }}</th><th>{{ t.get("col_revenue_ha", "Revenue/ha") }}</th><th>{{ t.get("col_cost_ha", "Cost/ha") }}</th><th>{{ t.get("col_roi", "ROI") }}</th></tr></thead><tbody>
+    {% for c in result.top_performers %}
+    <tr><td>{{ c.crop }}</td><td class="mono right">{{ "{:,}".format(c.revenue_fcfa_ha) }}</td><td class="mono right">{{ "{:,}".format(c.cost_fcfa_ha) }}</td><td class="mono right amber">{{ c.roi_percent }}%</td></tr>
+    {% endfor %}
+    </tbody></table>
+    {% endif %}
+</div>
+
+<!-- Agent auto-interpretation -->
+<form id="ml-interpretation"
+      hx-post="/ml/interpret"
+      hx-trigger="load"
+      hx-swap="innerHTML"
+      hx-target="this">
+    <input type="hidden" name="module" value="{{ module }}">
+    {% if result.crop is defined %}<input type="hidden" name="crop" value="{{ result.crop }}">{% endif %}
+    {% if result.product is defined %}<input type="hidden" name="produit" value="{{ result.product }}">{% endif %}
+    <div style="padding:8px;color:var(--text-3);font-size:11px;font-family:var(--mono)">{{ t.loading_interpretation }}</div>
+</form>

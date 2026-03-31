@@ -1,0 +1,8 @@
+{% if msg %}<div class="admin-msg">{{ msg }}</div>{% endif %}
+<div class="metrics-grid">
+    <div class="metric-card"><span class="metric-label">Produits</span><span class="metric-value">{{ stats.total_produits }}</span></div>
+    <div class="metric-card"><span class="metric-label">Entrées prix</span><span class="metric-value">{{ stats.total_prix }}</span></div>
+    <div class="metric-card"><span class="metric-label">Prévisions</span><span class="metric-value">{{ stats.total_previsions }}</span></div>
+    <div class="metric-card"><span class="metric-label">Conversations</span><span class="metric-value">{{ stats.total_conversations }}</span></div>
+    <div class="metric-card"><span class="metric-label">Marchés</span><span class="metric-value">{{ stats.marches_count }}</span></div>
+</div>

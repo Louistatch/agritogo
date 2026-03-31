@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ t.site_title }}</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://js.puter.com/v2/"></script>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/animations.js" defer></script>
+</head>
+<body>
+    <nav class="topnav">
+        <a href="/" class="topnav-logo">AgriTogo <span>{{ t.nav_dashboard }}</span></a>
+        <div class="topnav-links">
+            <a href="#" class="active" onclick="showTab('dashboard')">{{ t.nav_dashboard }}</a>
+            <a href="#" onclick="showTab('markets')">{{ t.nav_markets }}</a>
+            <a href="#" onclick="showTab('forecasts')">{{ t.nav_forecasts }}</a>
+            <a href="#" onclick="showTab('risk')">{{ t.nav_risk }}</a>
+            <a href="#" onclick="showTab('analyst')">{{ t.nav_analyst }}</a>
+        </div>
+        <div class="topnav-meta" style="display:flex;gap:12px;align-items:center">
+            <a href="/lang/en" hx-get="/lang/en" style="color:{{ 'var(--accent)' if lang=='en' else 'var(--text-muted)' }};text-decoration:none;font-size:12px">EN</a>
+            <span style="color:var(--border)">|</span>
+            <a href="/lang/fr" hx-get="/lang/fr" style="color:{{ 'var(--accent)' if lang=='fr' else 'var(--text-muted)' }};text-decoration:none;font-size:12px">FR</a>
+            <a href="/admin" style="color:var(--text-muted);text-decoration:none;font-size:12px;margin-left:8px">{{ t.nav_admin }}</a>
+        </div>
+    </nav>
+
+    <div class="container">
+
+        <!-- Dashboard -->
+        <section id="tab-dashboard" class="tab-content active">
+            <div class="section-header">
+                <div>
+                    <div class="section-title">{{ t.market_overview }}</div>
+                    <div class="section-subtitle">{{ t.market_subtitle }}</div>
+                </div>
+            </div>
+            <div class="ticker mb-md">
+                {% for p in prices %}
+                <div class="ticker-item">
+                    <span class="ticker-name">{{ p.nom }}</span>
+                    <span class="ticker-price">{{ p.prix }}</span>
+                    <span class="ticker-delta {{ 'green' if p.delta > 0 else 'red' if p.delta < 0 else '' }}" style="color:{{ 'var(--green)' if p.delta > 0 else 'var(--red)' if p.delta < 0 else 'var(--text-3)' }}">{{ '+' if p.delta > 0 else '' }}{{ p.delta }}%</span>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="grid-4 mb-md">
+                {% for p in prices[:4] %}
+                <div class="metric-card">
+                    <span class="label">{{ p.nom }}</span>
+                    <span class="value">{{ p.prix }} <span class="unit">FCFA/kg</span></span>
+                    <span class="delta {{ 'delta-up' if p.delta > 0 else 'delta-down' if p.delta < 0 else 'delta-flat' }}">
+                        {{ '+' if p.delta > 0 else '' }}{{ p.delta }}%
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="grid-2">
+                <div class="card decision-panel">
+                    <div class="card-header">
+                        <span class="card-title">{{ t.decision_intel }}</span>
+                        <span class="card-action" onclick="showTab('analyst')">{{ t.open_analyst }}</span>
+                    </div>
+                    <form hx-post="/engine" hx-target="#decision-output" hx-swap="innerHTML" hx-indicator="#decision-loading" style="margin-bottom:12px">
+                        <input type="hidden" name="audience" value="cooperative">
+                        <div class="chat-form">
+                            <input type="text" name="question" placeholder="{{ t.decision_placeholder }}" style="flex:1" autocomplete="off">
+                            <button type="submit">{{ t.analyze }}</button>
+                        </div>
+                    </form>
+                    <div id="decision-loading" class="htmx-indicator">{{ t.multi_agent }}</div>
+                    <div id="decision-output">
+                        <div class="decision-rationale">{{ t.decision_default }}</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">{{ t.price_data }}</span>
+                        <button class="card-action" hx-post="/prix" hx-target="#prix-output" hx-swap="innerHTML" hx-include="[name=produit],[name=marche]">{{ t.load }}</button>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-bottom:12px">
+                        <select name="produit" style="flex:1">{% for p in produits %}<option value="{{ p.nom }}">{{ p.nom }}</option>{% endfor %}</select>
+                        <select name="marche" style="flex:1"><option value="">{{ t.all_markets }}</option>{% for m in marches %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select>
+                    </div>
+                    <div id="prix-output"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Markets -->
+        <section id="tab-markets" class="tab-content">
+            <div class="section-header">
+                <div><div class="section-title">{{ t.market_data }}</div><div class="section-subtitle">{{ t.market_data_sub }}</div></div>
+            </div>
+            <div class="card">
+                <form hx-post="/prix" hx-target="#markets-output" hx-swap="innerHTML" style="display:flex;gap:8px;margin-bottom:12px">
+                    <select name="produit" style="flex:1">{% for p in produits %}<option value="{{ p.nom }}">{{ p.nom }} ({{ p.categorie }})</option>{% endfor %}</select>
+                    <select name="marche" style="flex:1"><option value="">{{ t.all_markets }}</option>{% for m in marches %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select>
+                    <button type="submit">{{ t.query }}</button>
+                </form>
+                <div id="markets-output"></div>
+            </div>
+        </section>
+
+        <!-- Forecasts -->
+        <section id="tab-forecasts" class="tab-content">
+            <div class="section-header">
+                <div><div class="section-title">{{ t.quant_models }}</div><div class="section-subtitle">{{ t.quant_sub }}</div></div>
+            </div>
+            <div class="grid-3" style="margin-bottom:16px">
+                <div class="card">
+                    <div class="card-header"><span class="card-title">{{ t.crop_yield }}</span></div>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">{{ t.crop_yield_desc }}</p>
+                    <form hx-post="/ml/crop-yield" hx-target="#forecast-output" hx-swap="innerHTML" hx-indicator="#forecast-loading" style="display:flex;gap:6px;align-items:end">
+                        <select name="crop" style="padding:4px 8px;font-size:12px">
+                            <option>Mais</option><option>Riz</option><option>Sorgho</option>
+                            <option>Soja</option><option>Manioc</option><option>Igname</option>
+                        </select>
+                        <button type="submit" class="btn-sm">{{ t.run_model }}</button>
+                    </form>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">{{ t.garch_vol }}</span></div>
+                    <form hx-post="/ml/garch" hx-target="#forecast-output" hx-swap="innerHTML" hx-indicator="#forecast-loading" style="display:flex;gap:6px;align-items:end">
+                        <select name="produit" style="padding:4px 8px;font-size:12px">{% for p in produits %}<option>{{ p.nom }}</option>{% endfor %}</select>
+                        <button type="submit" class="btn-sm">{{ t.run }}</button>
+                    </form>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">{{ t.agri_kpi }}</span></div>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">{{ t.agri_kpi_desc }}</p>
+                    <button hx-post="/ml/kpi" hx-target="#forecast-output" hx-swap="innerHTML" hx-indicator="#forecast-loading" class="btn-sm">{{ t.load_kpi }}</button>
+                </div>
+            </div>
+            <div id="forecast-loading" class="htmx-indicator">{{ t.running_model }}</div>
+            <div id="forecast-output" class="card" style="min-height:60px"></div>
+        </section>
+
+        <!-- Risk -->
+        <section id="tab-risk" class="tab-content">
+            <div class="section-header">
+                <div><div class="section-title">{{ t.risk_assessment }}</div><div class="section-subtitle">{{ t.risk_sub }}</div></div>
+            </div>
+            <div class="grid-2" style="margin-bottom:16px">
+                <div class="card">
+                    <div class="card-header"><span class="card-title">{{ t.fin_risk }}</span></div>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">{{ t.fin_risk_desc }}</p>
+                    <button hx-post="/ml/risk" hx-target="#risk-output" hx-swap="innerHTML" hx-indicator="#risk-loading" class="btn-sm">{{ t.run_assessment }}</button>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">{{ t.farmer_seg }}</span></div>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">{{ t.farmer_seg_desc }}</p>
+                    <button hx-post="/ml/segmentation" hx-target="#risk-output" hx-swap="innerHTML" hx-indicator="#risk-loading" class="btn-sm">{{ t.run_seg }}</button>
+                </div>
+            </div>
+            <div id="risk-loading" class="htmx-indicator">{{ t.computing }}</div>
+            <div id="risk-output" class="card" style="min-height:60px"></div>
+        </section>
+
+        <!-- Analyst -->
+        <section id="tab-analyst" class="tab-content">
+            <div class="section-header">
+                <div><div class="section-title">{{ t.analyst_console }}</div><div class="section-subtitle">{{ t.analyst_sub }}</div></div>
+            </div>
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header"><span class="card-title">{{ t.agent_chat }}</span></div>
+                    <div class="chat-container">
+                        <div id="chat-messages" class="chat-messages">
+                            {% for conv in conversations %}
+                            <div class="msg msg-{{ conv.role }}">
+                                <span class="msg-role">{{ "AgriTogo" if conv.role in ("agent","engine") else "You" }}</span>
+                                <div class="response-body">{{ conv.contenu }}</div>
+                            </div>
+                            {% endfor %}
+                            {% if not conversations %}
+                            <div class="msg msg-agent"><span class="msg-role">AgriTogo</span><p>{{ t.agent_ready }}</p></div>
+                            {% endif %}
+                        </div>
+                        <div class="model-selector">
+                            <label><input type="radio" name="model" value="gemini" checked> Gemini</label>
+                            <label><input type="radio" name="model" value="puter"> Claude ({{ t.unlimited }})</label>
+                        </div>
+                        <form hx-post="/chat" hx-target="#chat-messages" hx-swap="innerHTML" hx-indicator="#chat-loading" class="chat-form">
+                            <input type="text" name="message" placeholder="{{ t.query_agent }}" autocomplete="off" required>
+                            <button type="submit">{{ t.send }}</button>
+                        </form>
+                        <div id="chat-loading" class="htmx-indicator">{{ t.agent_processing }}</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">{{ t.decision_engine }}</span></div>
+                    <form hx-post="/engine" hx-target="#engine-output" hx-swap="innerHTML" hx-indicator="#engine-loading" style="margin-bottom:8px">
+                        <div style="display:flex;gap:8px;margin-bottom:8px">
+                            <select name="audience" style="flex:1">
+                                <option value="farmer">{{ t.audience_farmer }}</option>
+                                <option value="cooperative">{{ t.audience_coop }}</option>
+                                <option value="ngo">{{ t.audience_ngo }}</option>
+                                <option value="government">{{ t.audience_gov }}</option>
+                            </select>
+                        </div>
+                        <div class="chat-form">
+                            <input type="text" name="question" placeholder="{{ t.decision_placeholder }}" autocomplete="off" required>
+                            <button type="submit">{{ t.analyze }}</button>
+                        </div>
+                    </form>
+                    <div class="quick-actions" style="margin-bottom:8px">
+                        <button class="quick-btn" onclick="engineAsk('{{ t.quick_sell }}')">{{ t.quick_sell }}</button>
+                        <button class="quick-btn" onclick="engineAsk('{{ t.quick_storage }}')">{{ t.quick_storage }}</button>
+                        <button class="quick-btn" onclick="engineAsk('{{ t.quick_diversify }}')">{{ t.quick_diversify }}</button>
+                    </div>
+                    <div id="engine-loading" class="htmx-indicator">{{ t.multi_agent }}</div>
+                    <div id="engine-output"></div>
+                    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+                        <div class="card-header"><span class="card-title">{{ t.decision_memory }}</span>
+                            <button class="card-action" hx-get="/engine/memory" hx-target="#memory-output" hx-swap="innerHTML">{{ t.load }}</button>
+                        </div>
+                        <div id="memory-output"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        function engineAsk(m){var i=document.querySelector('#tab-analyst input[name="question"]');if(i){i.value=m;i.closest('form').querySelector('button[type="submit"]').click()}}
+        var SP='Tu es AgriTogo, expert en prix agricoles au Togo. Reponds en {{ "anglais" if lang=="en" else "francais" }} uniquement.';
+        document.addEventListener('htmx:configRequest',function(e){if(e.detail.path==='/chat'){var m=document.querySelector('input[name="model"]:checked');if(m&&m.value==='puter'){e.preventDefault();var mi=document.querySelector('.chat-form input[name="message"]');var msg=mi.value.trim();if(!msg)return;var cd=document.getElementById('chat-messages');cd.innerHTML+='<div class="msg msg-user"><span class="msg-role">You</span><p>'+msg+'</p></div>';cd.innerHTML+='<div class="msg msg-agent" id="puter-typing"><span class="msg-role">AgriTogo [Claude]</span><p>...</p></div>';cd.scrollTop=cd.scrollHeight;mi.value='';puter.ai.chat([{role:'system',content:SP},{role:'user',content:msg}],{model:'claude-sonnet-4-6'}).then(function(r){var t=r.message.content[0].text;document.getElementById('puter-typing').innerHTML='<span class="msg-role">AgriTogo [Claude]</span><div class="response-body">'+t.replace(/\n/g,'<br>')+'</div>';cd.scrollTop=cd.scrollHeight}).catch(function(err){document.getElementById('puter-typing').innerHTML='<span class="msg-role">AgriTogo</span><p>Error: '+err+'</p>'})}}});
+    </script>
+</body>
+</html>

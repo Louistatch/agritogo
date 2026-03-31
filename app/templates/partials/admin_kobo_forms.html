@@ -1,0 +1,18 @@
+{% if forms %}
+<table>
+    <thead><tr><th>Form Name</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for f in forms %}
+    <tr>
+        <td>{{ f.name }}</td>
+        <td>{% if f.deployment_status == "deployed" %}<span class="risk-low">Deployed</span>{% else %}<span class="risk-medium">{{ f.deployment_status or "Draft" }}</span>{% endif %}</td>
+        <td><button class="btn-sm btn-ghost" hx-get="/admin/kobo/submissions/{{ f.uid }}" hx-target="#kobo-subs-{{ f.uid }}" hx-swap="innerHTML">View Data</button>
+            <div id="kobo-subs-{{ f.uid }}"></div>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty">No forms found on KoboCollect server.</p>
+{% endif %}

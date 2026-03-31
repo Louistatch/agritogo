@@ -1,0 +1,27 @@
+<h3>🧠 Mémoire des Décisions ({{ memory|length }})</h3>
+{% for item in memory|reverse %}
+<div class="memory-item">
+    <div class="memory-header">
+        <span class="badge badge-{{ item.agent_type }}">{{ item.agent_type }}</span>
+        <span>{{ item.timestamp[:16] }}</span>
+        {% if item.feedback %}<span class="badge" style="background:#27ae60">✅ Feedback</span>{% endif %}
+    </div>
+    <p class="memory-query">❓ {{ item.query[:100] }}...</p>
+    <p class="memory-response">{{ (item.formatted_response or '')[:150] }}...</p>
+    {% if not item.feedback %}
+    <form hx-post="/engine/feedback" hx-target="closest .memory-item" hx-swap="afterend" style="display:flex;gap:0.5rem;margin-top:0.3rem">
+        <input type="hidden" name="index" value="{{ loop.revindex0 }}">
+        <select name="outcome" style="padding:0.3rem;border-radius:4px;border:1px solid #ddd;font-size:0.8rem">
+            <option value="correct">✅ Correct</option>
+            <option value="partial">⚠️ Partiel</option>
+            <option value="wrong">❌ Faux</option>
+        </select>
+        <input type="number" name="actual_price" placeholder="Prix réel FCFA" style="width:100px;padding:0.3rem;border-radius:4px;border:1px solid #ddd;font-size:0.8rem">
+        <button type="submit" style="padding:0.3rem 0.6rem;font-size:0.8rem">Feedback</button>
+    </form>
+    {% endif %}
+</div>
+{% endfor %}
+{% if not memory %}
+<p class="empty">Aucune décision en mémoire.</p>
+{% endif %}

@@ -1,0 +1,23 @@
+<table>
+    <thead><tr><th>Date</th><th>Produit</th><th>Marché</th><th>Prix (FCFA)</th><th>Action</th></tr></thead>
+    <tbody>
+    {% for row in data["items"] %}
+    <tr>
+        <td>{{ row.date }}</td>
+        <td>{{ row.produit }}</td>
+        <td>{{ row.marche }}</td>
+        <td class="prix">{{ "%.0f"|format(row.prix) }}</td>
+        <td><button hx-delete="/admin/prix/delete/{{ row.id }}" hx-target="#admin-prix" hx-swap="innerHTML" class="btn-danger">🗑</button></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+<div class="pagination">
+    {% if page > 1 %}
+    <button hx-get="/admin/prix?page={{ page - 1 }}" hx-target="#admin-prix" hx-swap="innerHTML">← Précédent</button>
+    {% endif %}
+    <span>Page {{ page }} / {{ data["pages"] }} ({{ data["total"] }} entries)</span>
+    {% if page < data["pages"] %}
+    <button hx-get="/admin/prix?page={{ page + 1 }}" hx-target="#admin-prix" hx-swap="innerHTML">Suivant →</button>
+    {% endif %}
+</div>

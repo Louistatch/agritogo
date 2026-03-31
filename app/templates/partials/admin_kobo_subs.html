@@ -1,0 +1,16 @@
+{% if subs %}
+<div style="margin-top:6px;padding:6px;background:var(--bg-1);border-radius:var(--radius);border:1px solid var(--border)">
+    <p style="font-size:11px;color:var(--text-2);margin-bottom:4px">{{ subs|length }} submission(s) for {{ uid }}</p>
+    <table>
+        <thead><tr>{% for key in subs[0].keys() if not key.startswith('_') %}{% if loop.index <= 6 %}<th>{{ key }}</th>{% endif %}{% endfor %}</tr></thead>
+        <tbody>
+        {% for s in subs[:10] %}
+        <tr>{% for key, val in s.items() if not key.startswith('_') %}{% if loop.index <= 6 %}<td>{{ val }}</td>{% endif %}{% endfor %}</tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% if subs|length > 10 %}<p class="empty">Showing 10 of {{ subs|length }}</p>{% endif %}
+</div>
+{% else %}
+<p class="empty" style="font-size:10px">No submissions yet.</p>
+{% endif %}

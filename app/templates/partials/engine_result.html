@@ -1,0 +1,26 @@
+<div class="engine-result">
+    <div class="engine-meta">
+        <span class="badge">{{ result.agent_type }}</span>
+        <span class="badge">{{ result.model_used }}</span>
+        {% if result.debate_used %}<span class="badge" style="border-color:var(--yellow);color:var(--yellow)">{{ t.view_debate }}</span>{% endif %}
+        <span class="badge">{{ result.audience }}</span>
+    </div>
+
+    {% if result.debate_used %}
+    <details class="debate-details">
+        <summary>{{ t.view_debate }}</summary>
+        <div class="debate-section"><h4>{{ t.proposal }}</h4><p>{{ result.proposal }}</p></div>
+        <div class="debate-section"><h4>{{ t.critique }}</h4><p>{{ result.critique }}</p></div>
+        <div class="debate-section"><h4>{{ t.arbitration }}</h4><p>{{ result.final_decision }}</p></div>
+    </details>
+    {% endif %}
+
+    <div class="engine-response">
+        <h3>{{ t.recommendation }}</h3>
+        <div class="response-body">{{ result.formatted_response }}</div>
+    </div>
+
+    {% if result.error %}
+    <div style="padding:8px 12px;margin-top:8px;border-radius:var(--radius);background:rgba(248,113,113,0.1);color:var(--red);font-size:12px;border:1px solid rgba(248,113,113,0.2)">{{ result.error }}</div>
+    {% endif %}
+</div>
