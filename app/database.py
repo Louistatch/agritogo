@@ -372,3 +372,11 @@ def get_latest_prices():
             "delta": delta,
         })
     return result
+
+
+def clear_conversations():
+    """Clear all conversation history."""
+    conn = get_db()
+    conn.execute("DELETE FROM conversations")
+    conn.commit()
+    conn.close()

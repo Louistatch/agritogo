@@ -23,7 +23,7 @@ load_dotenv()
 from app.database import (
     init_db, get_produits, get_marches,
     get_prix_historiques, save_conversation, get_conversations,
-    get_latest_prices,
+    get_latest_prices, clear_conversations,
 )
 from app.agent import ask_agent
 from app.i18n import get_translations, get_lang_instruction
@@ -74,6 +74,12 @@ def index():
         conversations=conversations,
         prices=latest_prices,
     )
+
+
+@app.route("/chat/clear", methods=["DELETE"])
+def chat_clear():
+    clear_conversations()
+    return '<div class="msg msg-agent"><span class="msg-role">AgriTogo</span><p>Conversation cleared. How can I help?</p></div>'
 
 
 @app.route("/chat", methods=["POST"])

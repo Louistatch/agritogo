@@ -1,8 +1,14 @@
 {% for conv in conversations %}
-<div class="msg msg-{{ conv.role }}">
-    <span class="msg-role">
-        {{ "AgriTogo" if conv.role == "agent" else "You" if conv.role == "user" else "Engine" }}
-    </span>
-    <div class="response-body">{{ conv.contenu }}</div>
+<div class="chat-bubble {{ 'bubble-user' if conv.role == 'user' else 'bubble-agent' }}">
+    <div class="bubble-meta">
+        <span class="bubble-sender">{{ "You" if conv.role == "user" else "AgriTogo" }}</span>
+        <span class="bubble-time">{{ conv.timestamp[11:16] if conv.timestamp|length > 16 else "" }}</span>
+    </div>
+    <div class="bubble-content">{{ conv.contenu }}</div>
+    {% if conv.role != "user" %}
+    <div class="bubble-actions">
+        <button class="btn-icon-sm" onclick="copyBubble(this)" title="Copy"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
+    </div>
+    {% endif %}
 </div>
 {% endfor %}

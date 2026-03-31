@@ -145,3 +145,138 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(animateBars, 300);
     setTimeout(animateTableRows, 400);
 });
+
+
+// Analyst sub-panel navigation
+function showAnalystPanel(name) {
+    document.querySelectorAll('.analyst-panel').forEach(function(p) {
+        p.classList.remove('active');
+    });
+    document.querySelectorAll('.analyst-tab').forEach(function(t) {
+        t.classList.remove('active');
+    });
+    var panel = document.getElementById('analyst-' + name);
+    if (panel) panel.classList.add('active');
+    if (event && event.target) event.target.classList.add('active');
+}
+
+
+// ── Advanced Chatbot Functions ──
+
+// Copy bubble content to clipboard
+function copyBubble(btn) {
+    var bubble = btn.closest('.chat-bubble');
+    var content = bubble.querySelector('.bubble-content');
+    if (content) {
+        navigator.clipboard.writeText(content.textContent).then(function() {
+            btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+            setTimeout(function() {
+                btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+            }, 1500);
+        });
+    }
+}
+
+// Export chat as text file
+function exportChat() {
+    var messages = document.getElementById('chat-messages');
+    if (!messages) return;
+    var bubbles = messages.querySelectorAll('.chat-bubble');
+    var text = 'AgriTogo Chat Export\n' + '='.repeat(40) + '\n\n';
+    bubbles.forEach(function(b) {
+        var sender = b.querySelector('.bubble-sender');
+        var time = b.querySelector('.bubble-time');
+        var content = b.querySelector('.bubble-content');
+        text += (sender ? sender.textContent : '') + (time ? ' [' + time.textContent + ']' : '') + ':\n';
+        text += (content ? content.textContent : '') + '\n\n';
+    });
+    var blob = new Blob([text], {type: 'text/plain'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'agritogo_chat_' + new Date().toISOString().slice(0,10) + '.txt';
+    a.click();
+}
+
+// Auto-scroll and reset on new messages
+document.body.addEventListener('htmx:afterSwap', function(e) {
+    if (e.detail.target.id === 'chat-messages') {
+        e.detail.target.scrollTop = e.detail.target.scrollHeight;
+        var form = document.getElementById('chat-form');
+        if (form) form.reset();
+        var input = document.getElementById('chat-input');
+        if (input) input.focus();
+    }
+    // Re-run animations on any swap
+    setTimeout(function() {
+        animateCounters();
+        animateBars();
+    }, 50);
+});
+
+// Enter to send, Shift+Enter for newline
+document.addEventListener('keydown', function(e) {
+    var input = document.getElementById('chat-input');
+    if (e.key === 'Enter' && !e.shiftKey && document.activeElement === input) {
+        e.preventDefault();
+        var form = document.getElementById('chat-form');
+        if (form && input.value.trim()) {
+            // Check if Puter mode
+            var model = document.querySelector('input[name="model"]:checked');
+            if (model && model.value === 'puter') {
+                handlePuterChat(input.value.trim());
+                input.value = '';
+            } else {
+                form.requestSubmit();
+            }
+        }
+    }
+});
+
+// Puter.js Claude handler
+function handlePuterChat(msg) {
+    var cd = document.getElementById('chat-messages');
+    if (!cd) return;
+    var now = new Date().toTimeString().slice(0,5);
+
+    cd.innerHTML += '<div class="chat-bubble bubble-user"><div class="bubble-meta"><span class="bubble-sender">You</span><span class="bubble-time">' + now + '</span></div><div class="bubble-content">' + escapeHtml(msg) + '</div></div>';
+
+    var typingId = 'puter-' + Date.now();
+    cd.innerHTML += '<div class="chat-bubble bubble-agent" id="' + typingId + '"><div class="bubble-meta"><span class="bubble-sender">AgriTogo [Claude]</span><span class="bubble-time">' + now + '</span></div><div class="bubble-content"><span class="typing-dots"><span></span><span></span><span></span></span></div></div>';
+    cd.scrollTop = cd.scrollHeight;
+
+    var SP = document.getElementById('puter-system-prompt').value;
+    puter.ai.chat([{role:'system',content:SP},{role:'user',content:msg}],{model:'claude-sonnet-4-6'}).then(function(r) {
+        var text = r.message.content[0].text;
+        var el = document.getElementById(typingId);
+        if (el) {
+            el.querySelector('.bubble-content').innerHTML = text.replace(/\n/g,'<br>');
+            el.innerHTML += '<div class="bubble-actions"><button class="btn-icon-sm" onclick="copyBubble(this)" title="Copy"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div>';
+        }
+        cd.scrollTop = cd.scrollHeight;
+    }).catch(function(err) {
+        var el = document.getElementById(typingId);
+        if (el) el.querySelector('.bubble-content').textContent = 'Error: ' + err;
+    });
+}
+
+function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+
+// Intercept HTMX chat for Puter mode
+document.addEventListener('htmx:configRequest', function(e) {
+    if (e.detail.path === '/chat') {
+        var model = document.querySelector('input[name="model"]:checked');
+        if (model && model.value === 'puter') {
+            e.preventDefault();
+            var input = document.getElementById('chat-input');
+            if (input && input.value.trim()) {
+                handlePuterChat(input.value.trim());
+                input.value = '';
+            }
+        }
+    }
+});

@@ -162,73 +162,138 @@
 
         <!-- Analyst -->
         <section id="tab-analyst" class="tab-content">
-            <div class="section-header">
-                <div><div class="section-title">{{ t.analyst_console }}</div><div class="section-subtitle">{{ t.analyst_sub }}</div></div>
+
+            <!-- Sub-navigation for Analyst -->
+            <div class="analyst-tabs">
+                <button class="analyst-tab active" onclick="showAnalystPanel('chat')">{{ t.agent_chat }}</button>
+                <button class="analyst-tab" onclick="showAnalystPanel('engine')">{{ t.decision_engine }}</button>
+                <button class="analyst-tab" onclick="showAnalystPanel('memory')">{{ t.decision_memory }}</button>
             </div>
-            <div class="grid-2">
-                <div class="card">
-                    <div class="card-header"><span class="card-title">{{ t.agent_chat }}</span></div>
-                    <div class="chat-container">
-                        <div id="chat-messages" class="chat-messages">
-                            {% for conv in conversations %}
-                            <div class="msg msg-{{ conv.role }}">
-                                <span class="msg-role">{{ "AgriTogo" if conv.role in ("agent","engine") else "You" }}</span>
-                                <div class="response-body">{{ conv.contenu }}</div>
+
+            <!-- Panel 1: Agent Chat -->
+            <div id="analyst-chat" class="analyst-panel active">
+                <div class="chatbot">
+                    <!-- Chat Header -->
+                    <div class="chatbot-header">
+                        <div class="chatbot-header-left">
+                            <div class="chatbot-status">
+                                <span class="status-dot"></span>
+                                <span class="chatbot-title">AgriTogo Agent</span>
                             </div>
-                            {% endfor %}
-                            {% if not conversations %}
-                            <div class="msg msg-agent"><span class="msg-role">AgriTogo</span><p>{{ t.agent_ready }}</p></div>
+                            <div class="model-selector" style="margin:0">
+                                <label><input type="radio" name="model" value="gemini" checked> Gemini</label>
+                                <label><input type="radio" name="model" value="puter"> Claude ({{ t.unlimited }})</label>
+                            </div>
+                        </div>
+                        <div class="chatbot-actions">
+                            <button class="btn-icon" onclick="exportChat()" title="Export">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            </button>
+                            <button class="btn-icon" hx-delete="/chat/clear" hx-target="#chat-messages" hx-swap="innerHTML" hx-confirm="Clear conversation history?" title="Clear">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Chat Messages -->
+                    <div id="chat-messages" class="chatbot-messages">
+                        {% for conv in conversations %}
+                        <div class="chat-bubble {{ 'bubble-user' if conv.role == 'user' else 'bubble-agent' }}">
+                            <div class="bubble-meta">
+                                <span class="bubble-sender">{{ "You" if conv.role == "user" else "AgriTogo" }}</span>
+                                <span class="bubble-time">{{ conv.timestamp[11:16] if conv.timestamp|length > 16 else "" }}</span>
+                            </div>
+                            <div class="bubble-content">{{ conv.contenu }}</div>
+                            {% if conv.role != "user" %}
+                            <div class="bubble-actions">
+                                <button class="btn-icon-sm" onclick="copyBubble(this)" title="Copy"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
+                            </div>
                             {% endif %}
                         </div>
-                        <div class="model-selector">
-                            <label><input type="radio" name="model" value="gemini" checked> Gemini</label>
-                            <label><input type="radio" name="model" value="puter"> Claude ({{ t.unlimited }})</label>
+                        {% endfor %}
+                        {% if not conversations %}
+                        <div class="chat-bubble bubble-agent">
+                            <div class="bubble-meta"><span class="bubble-sender">AgriTogo</span></div>
+                            <div class="bubble-content">{{ t.agent_ready }}</div>
                         </div>
-                        <form hx-post="/chat" hx-target="#chat-messages" hx-swap="innerHTML" hx-indicator="#chat-loading" class="chat-form">
-                            <input type="text" name="message" placeholder="{{ t.query_agent }}" autocomplete="off" required>
-                            <button type="submit">{{ t.send }}</button>
+                        {% endif %}
+                    </div>
+
+                    <!-- Typing Indicator -->
+                    <div id="chat-loading" class="htmx-indicator typing-indicator">
+                        <span></span><span></span><span></span>
+                    </div>
+
+                    <!-- Chat Input -->
+                    <div class="chatbot-input">
+                        <form hx-post="/chat" hx-target="#chat-messages" hx-swap="innerHTML" hx-indicator="#chat-loading" class="chatbot-form" id="chat-form">
+                            <input type="text" name="message" id="chat-input" placeholder="{{ t.query_agent }}" autocomplete="off" required>
+                            <button type="submit" class="send-btn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                            </button>
                         </form>
-                        <div id="chat-loading" class="htmx-indicator">{{ t.agent_processing }}</div>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-header"><span class="card-title">{{ t.decision_engine }}</span></div>
-                    <form hx-post="/engine" hx-target="#engine-output" hx-swap="innerHTML" hx-indicator="#engine-loading" style="margin-bottom:8px">
-                        <div style="display:flex;gap:8px;margin-bottom:8px">
-                            <select name="audience" style="flex:1">
-                                <option value="farmer">{{ t.audience_farmer }}</option>
-                                <option value="cooperative">{{ t.audience_coop }}</option>
-                                <option value="ngo">{{ t.audience_ngo }}</option>
-                                <option value="government">{{ t.audience_gov }}</option>
-                            </select>
-                        </div>
-                        <div class="chat-form">
-                            <input type="text" name="question" placeholder="{{ t.decision_placeholder }}" autocomplete="off" required>
-                            <button type="submit">{{ t.analyze }}</button>
-                        </div>
-                    </form>
-                    <div class="quick-actions" style="margin-bottom:8px">
-                        <button class="quick-btn" onclick="engineAsk('{{ t.quick_sell }}')">{{ t.quick_sell }}</button>
-                        <button class="quick-btn" onclick="engineAsk('{{ t.quick_storage }}')">{{ t.quick_storage }}</button>
-                        <button class="quick-btn" onclick="engineAsk('{{ t.quick_diversify }}')">{{ t.quick_diversify }}</button>
-                    </div>
-                    <div id="engine-loading" class="htmx-indicator">{{ t.multi_agent }}</div>
-                    <div id="engine-output"></div>
-                    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
-                        <div class="card-header"><span class="card-title">{{ t.decision_memory }}</span>
-                            <button class="card-action" hx-get="/engine/memory" hx-target="#memory-output" hx-swap="innerHTML">{{ t.load }}</button>
-                        </div>
-                        <div id="memory-output"></div>
                     </div>
                 </div>
             </div>
+
+            <!-- Panel 2: Decision Engine -->
+            <div id="analyst-engine" class="analyst-panel">
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="card-header"><span class="card-title">{{ t.decision_engine }}</span></div>
+                        <p class="analyst-desc">{{ t.decision_default }}</p>
+
+                        <form hx-post="/engine" hx-target="#engine-output" hx-swap="innerHTML" hx-indicator="#engine-loading" style="margin:12px 0">
+                            <div style="display:flex;gap:8px;margin-bottom:8px">
+                                <select name="audience" style="flex:1">
+                                    <option value="farmer">{{ t.audience_farmer }}</option>
+                                    <option value="cooperative">{{ t.audience_coop }}</option>
+                                    <option value="ngo">{{ t.audience_ngo }}</option>
+                                    <option value="government">{{ t.audience_gov }}</option>
+                                </select>
+                            </div>
+                            <div class="chat-form">
+                                <input type="text" name="question" placeholder="{{ t.decision_placeholder }}" autocomplete="off" required>
+                                <button type="submit">{{ t.analyze }}</button>
+                            </div>
+                        </form>
+
+                        <div class="quick-actions">
+                            <button class="quick-btn" onclick="engineAsk('{{ t.quick_sell }}')">{{ t.quick_sell }}</button>
+                            <button class="quick-btn" onclick="engineAsk('{{ t.quick_storage }}')">{{ t.quick_storage }}</button>
+                            <button class="quick-btn" onclick="engineAsk('{{ t.quick_diversify }}')">{{ t.quick_diversify }}</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header"><span class="card-title">{{ t.recommendation }}</span></div>
+                        <div id="engine-loading" class="htmx-indicator">{{ t.multi_agent }}</div>
+                        <div id="engine-output">
+                            <p class="analyst-desc">{{ t.decision_default }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel 3: Decision Memory -->
+            <div id="analyst-memory" class="analyst-panel">
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">{{ t.decision_memory }}</span>
+                        <button class="btn-sm btn-ghost" hx-get="/engine/memory" hx-target="#memory-output" hx-swap="innerHTML">{{ t.load }}</button>
+                    </div>
+                    <p class="analyst-desc">Past decisions, outcomes, and feedback for continuous improvement.</p>
+                    <div id="memory-output"></div>
+                </div>
+            </div>
+
         </section>
     </div>
 
     <script>
         function engineAsk(m){var i=document.querySelector('#tab-analyst input[name="question"]');if(i){i.value=m;i.closest('form').querySelector('button[type="submit"]').click()}}
-        var SP='Tu es AgriTogo, expert en prix agricoles au Togo. Reponds en {{ "anglais" if lang=="en" else "francais" }} uniquement.';
-        document.addEventListener('htmx:configRequest',function(e){if(e.detail.path==='/chat'){var m=document.querySelector('input[name="model"]:checked');if(m&&m.value==='puter'){e.preventDefault();var mi=document.querySelector('.chat-form input[name="message"]');var msg=mi.value.trim();if(!msg)return;var cd=document.getElementById('chat-messages');cd.innerHTML+='<div class="msg msg-user"><span class="msg-role">You</span><p>'+msg+'</p></div>';cd.innerHTML+='<div class="msg msg-agent" id="puter-typing"><span class="msg-role">AgriTogo [Claude]</span><p>...</p></div>';cd.scrollTop=cd.scrollHeight;mi.value='';puter.ai.chat([{role:'system',content:SP},{role:'user',content:msg}],{model:'claude-sonnet-4-6'}).then(function(r){var t=r.message.content[0].text;document.getElementById('puter-typing').innerHTML='<span class="msg-role">AgriTogo [Claude]</span><div class="response-body">'+t.replace(/\n/g,'<br>')+'</div>';cd.scrollTop=cd.scrollHeight}).catch(function(err){document.getElementById('puter-typing').innerHTML='<span class="msg-role">AgriTogo</span><p>Error: '+err+'</p>'})}}});
+    </script>
+    <input type="hidden" id="puter-system-prompt" value="Tu es AgriTogo, expert en prix agricoles au Togo. Reponds en {{ 'anglais' if lang=='en' else 'francais' }} uniquement. Sois professionnel et concis.">
     </script>
 </body>
 </html>
