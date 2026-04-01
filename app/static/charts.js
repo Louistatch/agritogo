@@ -113,18 +113,19 @@ Charts.renderSparklines = function(prices) {
 };
 
 // ── 3. REGIONAL HEATMAP — bound to /api/v1/kpi ───────────
-// kpi.yield_by_region + kpi.climate_risk_by_region
 Charts.regionalHeatmap = function(id, kpiData) {
-    if (!kpiData?.yield_by_region) return;
+    if (!kpiData || !kpiData.yield_by_region) return;
     const regions = Object.keys(kpiData.yield_by_region);
-    const metrics = ['Yield (kg/ha)', 'Climate Risk', 'Drought Prob.'];
+    if (!regions.length) return;
+    const metrics = ['Yield (kg/ha)', 'Climate Risk', 'Drought %'];
     const rows = regions.map(r => [
-        kpiData.yield_by_region[r]?.avg_yield_kg_ha || 0,
-        kpiData.climate_risk_by_region?.[r]?.risk_score || 0,
+        Math.round(kpiData.yield_by_region[r]?.avg_yield_kg_ha || 0),
+        Math.round(kpiData.climate_risk_by_region?.[r]?.risk_score || 0),
         Math.round((kpiData.climate_risk_by_region?.[r]?.drought_probability || 0)*100),
     ]);
-    const flat = rows.flat();
-    const min = Math.min(...flat), max = Math.max(...flat);
+    const flat = rows.flat().filter(v => v > 0);
+    const min = flat.length ? Math.min(...flat) : 0;
+    const max = flat.length ? Math.max(...flat) : 100;
 
     this.ec(id, {
         ...this.base({grid:{top:40,right:16,bottom:40,left:80}}),
@@ -142,10 +143,9 @@ Charts.regionalHeatmap = function(id, kpiData) {
 };
 
 // ── 4. RISK GAUGE — bound to /api/v1/risk ─────────────────
-// risk.risk_distribution: {high, medium, low}
 Charts.riskGauge = function(id, riskData) {
-    if (!riskData?.risk_distribution) return;
-    const d = riskData.risk_distribution;
+    if (!riskData) return;
+    const d = riskData.risk_distribution || {};
     const total = (d.high||0)+(d.medium||0)+(d.low||0);
     const score = total ? Math.round((d.high||0)/total*100) : 0;
     const color = score>60?T.red:score>30?T.amber:T.green;
@@ -488,10 +488,15 @@ const ATData = {
     },
 
     // GARCH forecast
-    async loadForecastChart(chartId, produit='Mais') {
+    async loadForecastChart(chartId, produit) {
+        produit = produit || (document.getElementById('dash-produit') ? document.getElementById('dash-produit').value : 'Ma\u00EFs');
         Charts.skeleton(chartId);
-        const data = await this.post('/forecast', {produit, periods:30});
-        if (!data?.forecast_30d) return;
+        const data = await this.post('/forecast', {produit: produit, periods:30});
+        if (!data || !data.forecast_30d || !data.forecast_30d.length) {
+            const el = document.getElementById(chartId);
+            if (el) el.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">No forecast data available</div>';
+            return;
+        }
         const dates = data.forecast_30d.map(d => d.date.slice(5));
         const mid = data.forecast_30d.map(d => +((d.price_lower+d.price_upper)/2).toFixed(0));
         const upper = data.forecast_30d.map(d => d.price_upper);
