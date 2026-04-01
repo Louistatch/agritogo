@@ -69,7 +69,10 @@ def run_garch_forecast(product="Mais", periods=30):
         vol_forecast = np.full(periods, float(np.std(returns_pct / 100)))
 
     last_price = float(prices[-1])
-    forecast_dates = [last_date + timedelta(days=i + 1) for i in range(periods)]
+    # Always use today as the forecast start date (dataset dates are historical)
+    from datetime import date
+    today = datetime.combine(date.today(), datetime.min.time())
+    forecast_dates = [today + timedelta(days=i + 1) for i in range(periods)]
     forecast_30d = [
         {
             "date": d.strftime("%Y-%m-%d"),

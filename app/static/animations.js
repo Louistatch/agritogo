@@ -289,31 +289,36 @@ document.addEventListener('DOMContentLoaded', function() {
     function initDashboardCharts() {
         var produit = document.getElementById('dash-produit');
         var marche = document.getElementById('dash-marche');
-        var produitVal = produit ? produit.value : 'Ma\u00EFs';
+        var produitVal = produit ? produit.value : 'Maïs';
         var marcheVal = marche ? marche.value : '';
 
-        // 1. Price chart
+        // 1. Price chart immediately
         ATData.loadPriceChart('chart-price', produitVal, marcheVal);
 
-        // 2. KPI heatmap + ROI bubble + radar (delayed — heavy)
-        setTimeout(function() { ATData.loadKPICharts(); }, 600);
+        // 2. KPI heatmap (GET — fast)
+        setTimeout(function() {
+            ATData.get('/kpi').then(function(kpi) {
+                if (!kpi) return;
+                if (document.getElementById('chart-heatmap')) Charts.regionalHeatmap('chart-heatmap', kpi);
+                if (document.getElementById('chart-roi-bubble')) Charts.roiBubble('chart-roi-bubble', kpi);
+                if (document.getElementById('chart-yield-radar')) Charts.yieldRadar('chart-yield-radar', kpi);
+            }).catch(function(e){ console.error('KPI:', e); });
+        }, 400);
 
-        // 3. Risk gauge on dashboard
+        // 3. Risk gauge (POST — medium)
         setTimeout(function() {
             ATData.post('/risk').then(function(risk) {
                 if (!risk) return;
-                if (document.getElementById('chart-gauge'))
-                    Charts.riskGauge('chart-gauge', risk);
-                if (document.getElementById('chart-heatmap'))
-                    ATData.loadKPICharts();
-            }).catch(function(){});
-        }, 1000);
+                if (document.getElementById('chart-gauge')) Charts.riskGauge('chart-gauge', risk);
+                if (document.getElementById('chart-risk-gauge')) Charts.riskGauge('chart-risk-gauge', risk);
+            }).catch(function(e){ console.error('Risk:', e); });
+        }, 800);
 
-        // 4. Forecast chart
+        // 4. Forecast (POST GARCH — slow)
         setTimeout(function() {
             if (document.getElementById('chart-forecast'))
                 ATData.loadForecastChart('chart-forecast', produitVal);
-        }, 1500);
+        }, 1200);
     }
 
     if (document.getElementById('tab-dashboard') &&
