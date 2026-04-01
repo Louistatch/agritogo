@@ -44,6 +44,8 @@ const Charts = {
     },
 
     skeleton(id) {
+        // Only show skeleton if no chart instance exists yet
+        if (this._ec[id]) return; // chart already initialized, don't destroy it
         const el = document.getElementById(id);
         if (el) el.innerHTML = '<div class="chart-skeleton"></div>';
     },
@@ -52,10 +54,11 @@ const Charts = {
 // ── 1. PRICE LINE — bound to /api/v1/prix/<produit> ───────
 // data: [{date, prix, marche, produit}]
 Charts.priceLine = function(id, apiData, produit) {
-    if (!apiData?.length) return;
+    if (!apiData || !apiData.length) return;
     const sorted = [...apiData].sort((a,b) => a.date.localeCompare(b.date));
     const dates = sorted.map(d => d.date.slice(5));
     const prices = sorted.map(d => +d.prix);
+    if (!prices.length || prices.every(p => isNaN(p))) return;
     const ma7 = prices.map((_, i) => {
         if (i < 6) return null;
         return +(prices.slice(i-6,i+1).reduce((a,b)=>a+b,0)/7).toFixed(0);
@@ -447,13 +450,25 @@ const ATData = {
     },
 
     // Dashboard: price chart
-    async loadPriceChart(chartId, produit, marche='') {
-        Charts.skeleton(chartId);
+    async loadPriceChart(chartId, produit, marche) {
+        if (!produit) produit = document.getElementById('dash-produit')?.value || 'Ma\u00EFs';
+        if (marche === undefined) marche = document.getElementById('dash-marche')?.value || '';
+
+        // Show loading state without destroying the chart instance
+        const el = document.getElementById(chartId);
+        if (el && !Charts._ec[chartId]) el.innerHTML = '<div class="chart-skeleton"></div>';
+
         const qs = marche ? `?marche=${encodeURIComponent(marche)}` : '';
+        // Always bypass cache when produit changes
+        const cacheKey = `/prix/${encodeURIComponent(produit)}${qs}`;
+        delete this._cache[cacheKey]; // force fresh fetch
         const data = await this.get(`/prix/${encodeURIComponent(produit)}${qs}`, 0);
-        if (data && data.length) {
-            Charts.priceLine(chartId, data, produit + (marche ? ` — ${marche}` : ' (avg)'));
+
+        if (!data || !data.length) {
+            if (el) el.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">No data for ${produit}</div>`;
+            return;
         }
+        Charts.priceLine(chartId, data, produit + (marche ? ` — ${marche}` : ' (avg)'));
     },
 
     // Dashboard: KPI heatmap + ROI bubble + radar
