@@ -288,15 +288,34 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function initDashboardCharts() {
         var produit = document.getElementById('dash-produit');
-        ATData.loadPriceChart('chart-price', produit ? produit.value : 'Mais');
-        ATData.loadKPICharts();
+        var marche = document.getElementById('dash-marche');
+        var produitVal = produit ? produit.value : 'Ma\u00EFs';
+        var marcheVal = marche ? marche.value : '';
+
+        // 1. Price chart
+        ATData.loadPriceChart('chart-price', produitVal, marcheVal);
+
+        // 2. KPI heatmap + ROI bubble + radar (delayed — heavy)
+        setTimeout(function() { ATData.loadKPICharts(); }, 600);
+
+        // 3. Risk gauge on dashboard
+        setTimeout(function() {
+            ATData.post('/risk').then(function(risk) {
+                if (!risk) return;
+                if (document.getElementById('chart-gauge'))
+                    Charts.riskGauge('chart-gauge', risk);
+                if (document.getElementById('chart-heatmap'))
+                    ATData.loadKPICharts();
+            }).catch(function(){});
+        }, 1000);
     }
 
-    if (document.getElementById('tab-dashboard')?.classList.contains('active')) {
-        setTimeout(initDashboardCharts, 400);
+    if (document.getElementById('tab-dashboard') &&
+        document.getElementById('tab-dashboard').classList.contains('active')) {
+        setTimeout(initDashboardCharts, 500);
     }
 
-    // Show risk/seg chart rows when results load
+    // Show risk/seg chart rows when ML results load
     document.body.addEventListener('htmx:afterSwap', function(e) {
         if (e.detail.target.id === 'risk-output') {
             var riskRow = document.getElementById('risk-charts-row');
@@ -306,14 +325,20 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(function() {
                 ATData.loadRiskCharts();
                 ATData.loadSegCharts();
-            }, 300);
+            }, 400);
         }
     });
 
     var origShowTab = window.showTab;
     window.showTab = function(name) {
         origShowTab && origShowTab(name);
-        if (name === 'dashboard') setTimeout(initDashboardCharts, 200);
-        if (name === 'forecasts') setTimeout(function() { ATData.loadKPICharts(); ATData.loadForecastChart('chart-forecast'); }, 200);
+        if (name === 'dashboard') setTimeout(initDashboardCharts, 300);
+        if (name === 'forecasts') {
+            setTimeout(function() {
+                ATData.loadKPICharts();
+                var p = document.getElementById('dash-produit');
+                ATData.loadForecastChart('chart-forecast', p ? p.value : 'Ma\u00EFs');
+            }, 300);
+        }
     };
 });

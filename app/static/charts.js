@@ -460,18 +460,24 @@ const ATData = {
     async loadKPICharts() {
         const kpi = await this.get('/kpi');
         if (!kpi) return;
-        Charts.regionalHeatmap('chart-heatmap', kpi);
-        Charts.roiBubble('chart-roi-bubble', kpi);
-        Charts.yieldRadar('chart-yield-radar', kpi);
+        if (document.getElementById('chart-heatmap')) Charts.regionalHeatmap('chart-heatmap', kpi);
+        if (document.getElementById('chart-roi-bubble')) Charts.roiBubble('chart-roi-bubble', kpi);
+        if (document.getElementById('chart-yield-radar')) Charts.yieldRadar('chart-yield-radar', kpi);
     },
 
     // Risk module: gauge + stacked bar + 3D sphere
     async loadRiskCharts() {
         const risk = await this.post('/risk');
         if (!risk) return;
-        Charts.riskGauge('chart-risk-gauge', risk);
-        Charts.riskByRegion('chart-risk-region', risk);
-        if (typeof THREE !== 'undefined') Charts.holo3DRisk('chart-risk-3d', risk);
+        // Dashboard gauge (id: chart-gauge)
+        if (document.getElementById('chart-gauge')) Charts.riskGauge('chart-gauge', risk);
+        // Risk tab gauge (id: chart-risk-gauge)
+        if (document.getElementById('chart-risk-gauge')) Charts.riskGauge('chart-risk-gauge', risk);
+        // Risk by region bar
+        if (document.getElementById('chart-risk-region')) Charts.riskByRegion('chart-risk-region', risk);
+        // 3D holographic
+        if (document.getElementById('chart-risk-3d') && typeof THREE !== 'undefined')
+            Charts.holo3DRisk('chart-risk-3d', risk);
     },
 
     // Segmentation: 3D holographic cluster
