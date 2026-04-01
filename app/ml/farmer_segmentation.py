@@ -1,5 +1,7 @@
-"""Farmer Segmentation — detailed profiles by cluster and region."""
-import os, numpy as np, pandas as pd
+"""Farmer Segmentation — PCA + KMeans with per-cluster and per-region profiles."""
+import os
+import numpy as np
+import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
@@ -7,7 +9,6 @@ from sklearn.cluster import KMeans
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'agentscope', 'data')
 REGIONS = ["Maritime", "Plateaux", "Centrale", "Kara", "Savanes"]
 FEAT_COLS = ['farm_size', 'annual_revenue', 'input_costs', 'yield_per_ha', 'climate_risk_score']
-
 CLUSTER_NAMES = {
     0: "Subsistence Smallholders",
     1: "Emerging Commercial",
@@ -16,28 +17,48 @@ CLUSTER_NAMES = {
 }
 
 
-def _load_real_data():
+def _load_data():
+    # yield_df.csv: Unnamed:0, Area, Item, Year, hg/ha_yield,
+    #   average_rain_fall_mm_per_year, pesticides_tonnes, avg_temp
     yld = pd.read_csv(os.path.join(DATA_DIR, 'archive1', 'yield_df.csv'))
+    # rainfall.csv: Area, Year, average_rain_fall_mm_per_year
     rain = pd.read_csv(os.path.join(DATA_DIR, 'archive1', 'rainfall.csv'))
+    # temp.csv: year, country, avg_temp
     temp = pd.read_csv(os.path.join(DATA_DIR, 'archive1', 'temp.csv'))
+
     rain.columns = [c.strip() for c in rain.columns]
     temp.columns = [c.strip() for c in temp.columns]
-    df = yld.merge(rain, left_on=['Area', 'Year'], right_on=['Area', 'Year'], how='left', suffixes=('', '_r'))
+
+    # Merge: yield_df LEFT JOIN rainfall on (Area, Year)
+    df = yld.merge(rain[['Area', 'Year', 'average_rain_fall_mm_per_year']],
+                   on=['Area', 'Year'], how='left', suffixes=('', '_rain'))
+
+    # Merge: LEFT JOIN temp on (Area=country, Year=year)
     temp = temp.rename(columns={'country': 'Area', 'year': 'Year'})
-    df = df.merge(temp, on=['Area', 'Year'], how='left', suffixes=('', '_t'))
+    df = df.merge(temp[['Area', 'Year', 'avg_temp']],
+                  on=['Area', 'Year'], how='left', suffixes=('', '_temp'))
+
+    # Resolve duplicate avg_temp columns — prefer original, fallback to merged
+    if 'avg_temp_temp' in df.columns:
+        df['avg_temp'] = df['avg_temp'].fillna(df['avg_temp_temp'])
+        df.drop(columns=['avg_temp_temp'], inplace=True)
+
     df = df.dropna(subset=['hg/ha_yield', 'pesticides_tonnes'])
     np.random.seed(42)
+    df = df.copy()
     df['region'] = np.random.choice(REGIONS, len(df))
+
+    # Build farmer profile features
     df['farm_size'] = (df['hg/ha_yield'] / 1000).clip(0.2, 50)
     df['annual_revenue'] = (df['hg/ha_yield'] * 50).clip(50_000, 20_000_000)
     df['input_costs'] = (df['pesticides_tonnes'] * 5000).clip(10_000, 5_000_000)
     df['yield_per_ha'] = df['hg/ha_yield']
-    avg_t = df['avg_temp'].fillna(28)
-    df['climate_risk_score'] = ((avg_t - avg_t.min()) / max(avg_t.max() - avg_t.min(), 1) * 100)
+    t = df['avg_temp'].fillna(28)
+    df['climate_risk_score'] = ((t - t.min()) / max(float(t.max() - t.min()), 1) * 100)
     return df
 
 
-def _synthetic_fallback():
+def _synthetic():
     np.random.seed(42)
     n = 500
     return pd.DataFrame({
@@ -51,28 +72,28 @@ def _synthetic_fallback():
 
 
 def run_farmer_segmentation(n_clusters=4):
-    """Segment farmers with detailed per-cluster and per-region breakdowns."""
+    """Segment farmers into n_clusters using PCA(2) + KMeans."""
     try:
-        data = _load_real_data()
+        data = _load_data()
     except Exception:
-        data = _synthetic_fallback()
+        data = _synthetic()
 
     X_raw = data[FEAT_COLS].fillna(data[FEAT_COLS].median())
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_raw)
+    X_scaled = StandardScaler().fit_transform(X_raw)
 
     pca = PCA(n_components=2, random_state=42)
     X_pca = pca.fit_transform(X_scaled)
 
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    labels = kmeans.fit_predict(X_pca)
-    data['cluster'] = labels
+    data = data.copy()
+    data['cluster'] = kmeans.fit_predict(X_pca)
 
-    # Detailed stats per cluster
     cluster_profiles = []
     for i in range(n_clusters):
         sub = data[data['cluster'] == i]
-        profile = {
+        region_dist = sub['region'].value_counts().to_dict()
+        top_region = max(region_dist, key=region_dist.get) if region_dist else "N/A"
+        cluster_profiles.append({
             "id": i,
             "name": CLUSTER_NAMES.get(i, f"Cluster {i}"),
             "count": len(sub),
@@ -86,23 +107,18 @@ def run_farmer_segmentation(n_clusters=4):
                 (sub['annual_revenue'].mean() - sub['input_costs'].mean())
                 / max(sub['annual_revenue'].mean(), 1) * 100, 1
             ),
-        }
-        # Region distribution within cluster
-        region_dist = sub['region'].value_counts().to_dict()
-        top_region = max(region_dist, key=region_dist.get) if region_dist else "N/A"
-        profile["top_region"] = top_region
-        profile["region_distribution"] = {
-            r: round(region_dist.get(r, 0) / len(sub) * 100, 1) for r in REGIONS
-        }
-        cluster_profiles.append(profile)
+            "top_region": top_region,
+            "region_distribution": {
+                r: round(region_dist.get(r, 0) / len(sub) * 100, 1) for r in REGIONS
+            },
+        })
 
-    # Per-region summary
     region_summary = {}
     for r in REGIONS:
         sub = data[data['region'] == r]
         if len(sub) == 0:
             continue
-        dominant = sub['cluster'].mode().iloc[0] if len(sub) > 0 else 0
+        dominant = int(sub['cluster'].mode().iloc[0])
         region_summary[r] = {
             "total_farmers": len(sub),
             "dominant_segment": CLUSTER_NAMES.get(dominant, f"Cluster {dominant}"),
@@ -112,6 +128,7 @@ def run_farmer_segmentation(n_clusters=4):
         }
 
     var_explained = [round(float(v), 4) for v in pca.explained_variance_ratio_]
+    best = max(cluster_profiles, key=lambda x: x['avg_revenue_fcfa'])
 
     return {
         "cluster_profiles": cluster_profiles,
@@ -122,7 +139,6 @@ def run_farmer_segmentation(n_clusters=4):
         "summary": (
             f"Segmentation de {len(data)} agriculteurs en {n_clusters} groupes. "
             f"PCA variance: {sum(var_explained)*100:.1f}%. "
-            f"Plus grand segment: {cluster_profiles[0]['name']} ({cluster_profiles[0]['pct']}%). "
-            f"Revenu moyen le plus eleve: {max(cluster_profiles, key=lambda x: x['avg_revenue_fcfa'])['name']}."
+            f"Revenu moyen le plus eleve: {best['name']} ({best['avg_revenue_fcfa']:,} FCFA)."
         ),
     }
