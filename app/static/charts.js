@@ -437,9 +437,11 @@ const ATData = {
     async post(path, body={}) {
         try {
             const r = await fetch('/api/v1' + path, {
-                method:'POST', headers:{'Content-Type':'application/json'},
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
                 body: JSON.stringify(body),
             });
+            if (!r.ok) return null;
             return await r.json();
         } catch(e) { return null; }
     },
