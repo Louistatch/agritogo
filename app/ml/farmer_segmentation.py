@@ -16,6 +16,8 @@ CLUSTER_NAMES = {
     3: "Large Diversified",
 }
 
+from app.ml.togo_adapter import TOGO_REGIONS, TOGO_YIELDS
+
 
 def _load_data():
     # yield_df.csv: Unnamed:0, Area, Item, Year, hg/ha_yield,
@@ -47,6 +49,11 @@ def _load_data():
     np.random.seed(42)
     df = df.copy()
     df['region'] = np.random.choice(REGIONS, len(df))
+
+    # Adjust avg_temp to Togo realistic values per region
+    df['avg_temp'] = df['region'].map(
+        lambda r: TOGO_REGIONS.get(r, TOGO_REGIONS['Centrale'])['avg_temp'] + np.random.normal(0, 1.5)
+    )
 
     # Build farmer profile features
     df['farm_size'] = (df['hg/ha_yield'] / 1000).clip(0.2, 50)

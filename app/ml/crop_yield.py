@@ -24,6 +24,8 @@ CROP_EN = {v: k for k, v in CROP_FR.items()}
 FEATURES = ['avg_temp', 'average_rain_fall_mm_per_year', 'pesticides_tonnes', 'Year']
 TARGET = 'hg/ha_yield'
 
+from app.ml.togo_adapter import adapt_to_togo, TOGO_REGIONS, TOGO_YIELDS
+
 
 def _try_climate_dataset():
     """Load climate_change_impact_on_agriculture_2024.csv.
@@ -66,6 +68,8 @@ def _try_climate_dataset():
             df['crop'] = df['crop_type'].map(crop_map).fillna('Mais')
             np.random.seed(42)
             df['region'] = np.random.choice(REGIONS, len(df))
+            # Adapt to Togo context — replace China/India with Togo regions
+            df = adapt_to_togo(df, region_col='Region' if 'Region' in df.columns else None)
             return df
     return None
 
@@ -80,6 +84,8 @@ def _load_data():
         yld = yld.copy()
         yld['region'] = np.random.choice(REGIONS, len(yld))
         yld['crop'] = yld['Item'].map(CROP_FR)
+        # Adapt yields to Togo ranges
+        yld = adapt_to_togo(yld, region_col=None)
     except Exception:
         yld = None
 

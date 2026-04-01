@@ -7,15 +7,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'agentscope', 'data')
-
-# AgriRiskFin_Dataset.csv cols: Enterprise_ID, Region, Enterprise_Size, Revenue,
-#   Expenses, Loan_Amount, Debt_to_Equity, Avg_Temperature, Rainfall, Drought_Index,
-#   Flood_Risk_Score, Commodity_Price_Index, Input_Cost_Index, Policy_Support_Score,
-#   Quarter, Net_Profit, Financial_Risk_Level
 REGION_MAP = {"East": "Maritime", "West": "Plateaux", "North": "Kara",
               "South": "Centrale", "Central": "Savanes"}
 FEATURES = ['Loan_Amount', 'Debt_to_Equity', 'Avg_Temperature',
             'Rainfall', 'Drought_Index', 'Flood_Risk_Score']
+
+from app.ml.togo_adapter import TOGO_REGIONS
 
 
 def _load_data():
@@ -27,6 +24,20 @@ def _load_data():
     for col in ['Revenue', 'Expenses', 'Loan_Amount']:
         if col in df.columns:
             df[col] = df[col] * 1000
+    # Replace generic climate values with Togo-realistic values per region
+    np.random.seed(42)
+    df['Avg_Temperature'] = df['Region'].map(
+        lambda r: TOGO_REGIONS.get(r, TOGO_REGIONS['Centrale'])['avg_temp'] + np.random.normal(0, 1.5)
+    )
+    df['Rainfall'] = df['Region'].map(
+        lambda r: TOGO_REGIONS.get(r, TOGO_REGIONS['Centrale'])['rainfall_mm'] + np.random.normal(0, 80)
+    )
+    df['Drought_Index'] = df['Region'].map(
+        lambda r: TOGO_REGIONS.get(r, TOGO_REGIONS['Centrale'])['drought_prob'] + np.random.uniform(-0.05, 0.05)
+    ).clip(0, 1)
+    df['Flood_Risk_Score'] = df['Region'].map(
+        lambda r: TOGO_REGIONS.get(r, TOGO_REGIONS['Centrale'])['flood_prob'] + np.random.uniform(-0.05, 0.05)
+    ).clip(0, 1)
     return df
 
 

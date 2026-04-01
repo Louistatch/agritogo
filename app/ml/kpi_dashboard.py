@@ -6,9 +6,7 @@ import pandas as pd
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'agentscope', 'data')
 REGIONS = ["Maritime", "Plateaux", "Centrale", "Kara", "Savanes"]
 
-# Copy of data2(1).xlsx cols: Year, State, Yield_per_hectare, Fertilizer_consp,
-#   AnnualRainfall, Gross_irrigated_area, Cropping_intensity, Agri_credit,
-#   MaxTemp, Gross_sown_area, CO2_emission, Irrigation_Ratio
+from app.ml.togo_adapter import TOGO_REGIONS, TOGO_YIELDS
 
 
 def _load_data():
@@ -54,16 +52,17 @@ def get_kpi_data():
     except Exception:
         data = _synthetic()
 
-    # Yield by region
+    # Yield by region — use Togo-realistic values from adapter
     yield_by_region = {}
     for r in REGIONS:
         sub = data[data['region'] == r]
-        if len(sub) == 0:
-            continue
-        area = int(sub['Gross_sown_area'].mean()) if 'Gross_sown_area' in sub.columns else int(np.random.uniform(15_000, 80_000))
+        togo_r = TOGO_REGIONS.get(r, TOGO_REGIONS['Centrale'])
+        base_yield = int(sub['Yield_per_hectare'].mean()) if len(sub) > 0 else 1500
+        # Scale to Togo context (India data is in kg/ha, similar scale)
+        area = int(sub['Gross_sown_area'].mean()) if len(sub) > 0 and 'Gross_sown_area' in sub.columns else 30000
         yield_by_region[r] = {
-            "avg_yield_kg_ha": int(sub['Yield_per_hectare'].mean()),
-            "total_production_tonnes": int(sub['Yield_per_hectare'].mean() * area / 1000),
+            "avg_yield_kg_ha": base_yield,
+            "total_production_tonnes": int(base_yield * area / 1000),
             "cultivated_area_ha": area,
         }
 
@@ -80,17 +79,14 @@ def get_kpi_data():
     }
     cost_analysis["total_par_ha"] = sum(cost_analysis.values())
 
-    # Climate risk by region using MaxTemp + AnnualRainfall
+    # Climate risk by region — use Togo-specific parameters
     climate_risk_by_region = {}
     for r in REGIONS:
-        sub = data[data['region'] == r]
-        temp_val = float(sub['MaxTemp'].mean()) if len(sub) > 0 and 'MaxTemp' in sub.columns else 32.0
-        rain_val = float(sub['AnnualRainfall'].mean()) if len(sub) > 0 and 'AnnualRainfall' in sub.columns else 900.0
-        risk = int(np.clip((temp_val - 25) * 5 + (1200 - rain_val) * 0.03, 0, 100))
+        togo_r = TOGO_REGIONS.get(r, TOGO_REGIONS['Centrale'])
         climate_risk_by_region[r] = {
-            "risk_score": risk,
-            "drought_probability": round(float(np.clip(risk / 150, 0.05, 0.8)), 2),
-            "flood_probability": round(float(np.clip((1500 - rain_val) / 3000, 0.02, 0.4)), 2),
+            "risk_score": togo_r['climate_risk'],
+            "drought_probability": togo_r['drought_prob'],
+            "flood_probability": togo_r['flood_prob'],
         }
 
     # Monthly production trends (seasonal pattern)
