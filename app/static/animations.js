@@ -280,3 +280,31 @@ document.addEventListener('htmx:configRequest', function(e) {
         }
     }
 });
+
+
+// ── ECharts Dashboard Init ────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof ATData === 'undefined' || typeof echarts === 'undefined') return;
+
+    // Load charts when dashboard tab is visible
+    function initDashboardCharts() {
+        var produit = document.getElementById('dash-produit');
+        var name = produit ? produit.value : 'Mais';
+        ATData.loadPriceChart('chart-price', name);
+        ATData.loadKPIHeatmap('chart-heatmap');
+        ATData.loadRiskGauge('chart-gauge');
+    }
+
+    // Init on load if dashboard is active
+    if (document.getElementById('tab-dashboard') &&
+        document.getElementById('tab-dashboard').classList.contains('active')) {
+        setTimeout(initDashboardCharts, 300);
+    }
+
+    // Re-init when switching to dashboard tab
+    var origShowTab = window.showTab;
+    window.showTab = function(name) {
+        origShowTab && origShowTab(name);
+        if (name === 'dashboard') setTimeout(initDashboardCharts, 200);
+    };
+});

@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ t.site_title }}</title>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
     <script src="https://js.puter.com/v2/"></script>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/charts.js" defer></script>
     <script src="/static/animations.js" defer></script>
 </head>
 <body>
@@ -36,13 +38,19 @@
                     <div class="section-title">{{ t.market_overview }}</div>
                     <div class="section-subtitle">{{ t.market_subtitle }}</div>
                 </div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <select id="dash-produit" onchange="ATData.loadPriceChart('chart-price', this.value)" style="padding:4px 8px;font-size:11px">
+                        {% for p in produits %}<option value="{{ p.nom }}">{{ p.nom }}</option>{% endfor %}
+                    </select>
+                </div>
             </div>
+
             <div class="ticker mb-md">
                 {% for p in prices %}
                 <div class="ticker-item">
                     <span class="ticker-name">{{ p.nom }}</span>
                     <span class="ticker-price">{{ p.prix }}</span>
-                    <span class="ticker-delta {{ 'green' if p.delta > 0 else 'red' if p.delta < 0 else '' }}" style="color:{{ 'var(--green)' if p.delta > 0 else 'var(--red)' if p.delta < 0 else 'var(--text-3)' }}">{{ '+' if p.delta > 0 else '' }}{{ p.delta }}%</span>
+                    <span class="ticker-delta" style="color:{{ 'var(--green)' if p.delta > 0 else 'var(--red)' if p.delta < 0 else 'var(--text-3)' }}">{{ '+' if p.delta > 0 else '' }}{{ p.delta }}%</span>
                 </div>
                 {% endfor %}
             </div>
@@ -52,13 +60,34 @@
                 <div class="metric-card">
                     <span class="label">{{ p.nom }}</span>
                     <span class="value">{{ p.prix }} <span class="unit">FCFA/kg</span></span>
-                    <span class="delta {{ 'delta-up' if p.delta > 0 else 'delta-down' if p.delta < 0 else 'delta-flat' }}">
-                        {{ '+' if p.delta > 0 else '' }}{{ p.delta }}%
-                    </span>
+                    <span class="delta {{ 'delta-up' if p.delta > 0 else 'delta-down' if p.delta < 0 else 'delta-flat' }}">{{ '+' if p.delta > 0 else '' }}{{ p.delta }}%</span>
                 </div>
                 {% endfor %}
             </div>
-            <div class="grid-2">
+
+            <div class="grid-2 mb-md">
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Price Trend</span>
+                        <span id="chart-price-insight" class="chart-insight"></span>
+                    </div>
+                    <div id="chart-price" class="chart-container"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">30-Day Forecast</span></div>
+                    <div id="chart-forecast" class="chart-container"></div>
+                </div>
+            </div>
+
+            <div class="grid-3 mb-md">
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Regional Heatmap</span></div>
+                    <div id="chart-heatmap" class="chart-container"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Portfolio Risk</span></div>
+                    <div id="chart-gauge" style="height:180px"></div>
+                </div>
                 <div class="card decision-panel">
                     <div class="card-header">
                         <span class="card-title">{{ t.decision_intel }}</span>
@@ -72,20 +101,7 @@
                         </div>
                     </form>
                     <div id="decision-loading" class="htmx-indicator">{{ t.multi_agent }}</div>
-                    <div id="decision-output">
-                        <div class="decision-rationale">{{ t.decision_default }}</div>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-header">
-                        <span class="card-title">{{ t.price_data }}</span>
-                        <button class="card-action" hx-post="/prix" hx-target="#prix-output" hx-swap="innerHTML" hx-include="[name=produit],[name=marche]">{{ t.load }}</button>
-                    </div>
-                    <div style="display:flex;gap:8px;margin-bottom:12px">
-                        <select name="produit" style="flex:1">{% for p in produits %}<option value="{{ p.nom }}">{{ p.nom }}</option>{% endfor %}</select>
-                        <select name="marche" style="flex:1"><option value="">{{ t.all_markets }}</option>{% for m in marches %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select>
-                    </div>
-                    <div id="prix-output"></div>
+                    <div id="decision-output"><div class="decision-rationale">{{ t.decision_default }}</div></div>
                 </div>
             </div>
         </section>
