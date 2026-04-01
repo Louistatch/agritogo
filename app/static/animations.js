@@ -308,6 +308,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     ATData.loadKPICharts();
             }).catch(function(){});
         }, 1000);
+
+        // 4. Forecast chart
+        setTimeout(function() {
+            if (document.getElementById('chart-forecast'))
+                ATData.loadForecastChart('chart-forecast', produitVal);
+        }, 1500);
     }
 
     if (document.getElementById('tab-dashboard') &&

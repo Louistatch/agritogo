@@ -120,28 +120,44 @@ Charts.regionalHeatmap = function(id, kpiData) {
     if (!kpiData || !kpiData.yield_by_region) return;
     const regions = Object.keys(kpiData.yield_by_region);
     if (!regions.length) return;
-    const metrics = ['Yield (kg/ha)', 'Climate Risk', 'Drought %'];
-    const rows = regions.map(r => [
-        Math.round(kpiData.yield_by_region[r]?.avg_yield_kg_ha || 0),
-        Math.round(kpiData.climate_risk_by_region?.[r]?.risk_score || 0),
-        Math.round((kpiData.climate_risk_by_region?.[r]?.drought_probability || 0)*100),
+
+    // Normalize each metric to 0-100 for comparable heatmap
+    const rawYield = regions.map(r => kpiData.yield_by_region[r]?.avg_yield_kg_ha || 0);
+    const rawRisk  = regions.map(r => kpiData.climate_risk_by_region?.[r]?.risk_score || 0);
+    const rawDrought = regions.map(r => Math.round((kpiData.climate_risk_by_region?.[r]?.drought_probability || 0)*100));
+
+    const normalize = arr => {
+        const mn = Math.min(...arr), mx = Math.max(...arr);
+        return mx === mn ? arr.map(() => 50) : arr.map(v => Math.round((v-mn)/(mx-mn)*100));
+    };
+
+    const normYield = normalize(rawYield);
+    const normRisk  = normalize(rawRisk);
+    const normDrought = normalize(rawDrought);
+
+    const metrics = ['Yield', 'Climate Risk', 'Drought'];
+    const heatData = regions.flatMap((r, ri) => [
+        [0, ri, normYield[ri],   rawYield[ri] + ' kg/ha'],
+        [1, ri, normRisk[ri],    rawRisk[ri] + '/100'],
+        [2, ri, normDrought[ri], rawDrought[ri] + '%'],
     ]);
-    const flat = rows.flat().filter(v => v > 0);
-    const min = flat.length ? Math.min(...flat) : 0;
-    const max = flat.length ? Math.max(...flat) : 100;
 
     this.ec(id, {
-        ...this.base({grid:{top:40,right:16,bottom:40,left:80}}),
+        ...this.base({grid:{top:36,right:16,bottom:36,left:80}}),
         tooltip:{...this.base().tooltip,
-            formatter:p=>`<b>${regions[p.value[1]]}</b> — ${metrics[p.value[0]]}<br><b>${p.value[2]}</b>`},
-        xAxis:{type:'category',data:metrics,axisLabel:{color:T.t2,fontSize:10},
+            formatter: p => `<b>${regions[p.value[1]]}</b><br>${metrics[p.value[0]]}: <b>${p.value[3]}</b>`},
+        xAxis:{type:'category',data:metrics,
+            axisLabel:{color:T.t1,fontSize:11,fontWeight:600},
+            axisLine:{lineStyle:{color:T.border}},
             splitArea:{show:true,areaStyle:{color:['transparent',T.bg2+'40']}}},
-        yAxis:{type:'category',data:regions,axisLabel:{color:T.t1,fontSize:11}},
-        visualMap:{min,max,show:false,
-            inRange:{color:[T.bg3,T.accent+'50',T.accent,T.cyan]}},
-        series:[{type:'heatmap',
-            data:rows.flatMap((row,ri)=>row.map((v,ci)=>[ci,ri,v])),
-            label:{show:true,color:T.t0,fontSize:10,formatter:p=>p.value[2]}}],
+        yAxis:{type:'category',data:regions,
+            axisLabel:{color:T.t1,fontSize:11},
+            axisLine:{lineStyle:{color:T.border}}},
+        visualMap:{min:0,max:100,show:false,
+            inRange:{color:[T.bg3,T.accent+'60',T.accent,T.cyan]}},
+        series:[{type:'heatmap',data:heatData,
+            label:{show:true,color:T.t0,fontSize:11,fontWeight:600,
+                formatter:p=>p.value[3]}}],
     });
 };
 
@@ -152,22 +168,28 @@ Charts.riskGauge = function(id, riskData) {
     const total = (d.high||0)+(d.medium||0)+(d.low||0);
     const score = total ? Math.round((d.high||0)/total*100) : 0;
     const color = score>60?T.red:score>30?T.amber:T.green;
+    const label = score>60?'HIGH RISK':score>30?'MEDIUM':'LOW RISK';
 
     this.ec(id, {
         ...this.base({grid:undefined}),
         series:[{
             type:'gauge', startAngle:200, endAngle:-20, min:0, max:100,
-            radius:'88%', center:['50%','58%'],
-            progress:{show:true,width:12,itemStyle:{color}},
-            axisLine:{lineStyle:{width:12,color:[[1,T.bg3]]}},
+            radius:'85%', center:['50%','55%'],
+            progress:{show:true,width:14,itemStyle:{color}},
+            axisLine:{lineStyle:{width:14,color:[[1,T.bg3]]}},
             axisTick:{show:false}, splitLine:{show:false}, axisLabel:{show:false},
             pointer:{show:false},
-            detail:{valueAnimation:true,fontSize:24,fontWeight:700,
-                fontFamily:T.mono,color:T.t0,offsetCenter:[0,'8%'],
+            detail:{valueAnimation:true,fontSize:26,fontWeight:700,
+                fontFamily:T.mono,color:T.t0,offsetCenter:[0,'5%'],
                 formatter:v=>v.toFixed(0)+'%'},
-            title:{offsetCenter:[0,'32%'],fontSize:11,color:T.t3},
-            data:[{value:score,name:'High Risk'}],
+            title:{offsetCenter:[0,'28%'],fontSize:10,color,fontWeight:600},
+            data:[{value:score,name:label}],
         }],
+        graphic:[
+            {type:'text',left:'center',bottom:8,
+                style:{text:`${d.high||0} high · ${d.medium||0} med · ${d.low||0} low`,
+                    fill:T.t3,fontSize:10,fontFamily:T.mono}},
+        ],
     });
 };
 
@@ -505,32 +527,39 @@ const ATData = {
     // GARCH forecast
     async loadForecastChart(chartId, produit) {
         produit = produit || (document.getElementById('dash-produit') ? document.getElementById('dash-produit').value : 'Ma\u00EFs');
-        Charts.skeleton(chartId);
+        const el = document.getElementById(chartId);
+        if (el && !Charts._ec[chartId]) {
+            el.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:11px;font-family:var(--mono)">Computing GARCH(1,1)...</div>';
+        }
         const data = await this.post('/forecast', {produit: produit, periods:30});
         if (!data || !data.forecast_30d || !data.forecast_30d.length) {
-            const el = document.getElementById(chartId);
-            if (el) el.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">No forecast data available</div>';
+            if (el) el.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">No forecast data</div>';
             return;
         }
         const dates = data.forecast_30d.map(d => d.date.slice(5));
         const mid = data.forecast_30d.map(d => +((d.price_lower+d.price_upper)/2).toFixed(0));
-        const upper = data.forecast_30d.map(d => d.price_upper);
-        const lower = data.forecast_30d.map(d => d.price_lower);
+        const upper = data.forecast_30d.map(d => +d.price_upper.toFixed(0));
+        const lower = data.forecast_30d.map(d => +d.price_lower.toFixed(0));
+        const lastPrice = data.last_price_fcfa || mid[0];
         Charts.ec(chartId, {
             ...Charts.base(),
-            tooltip:{...Charts.base().tooltip,trigger:'axis'},
+            tooltip:{...Charts.base().tooltip,trigger:'axis',
+                formatter:p=>`<b>${p[0].axisValue}</b><br>${p.filter(s=>s.value!=null).map(s=>`${s.marker}${s.seriesName}: <b>${s.value} F</b>`).join('<br>')}`},
             legend:{data:['Forecast','Upper','Lower'],textStyle:{color:T.t2,fontSize:10},top:4},
             xAxis:{type:'category',data:dates,axisLabel:{color:T.t3,fontSize:10},splitLine:{show:false}},
             yAxis:{type:'value',axisLabel:{color:T.t3,fontSize:10,formatter:v=>v+' F'},
                 splitLine:{lineStyle:{color:T.border,type:'dashed'}}},
             series:[
-                {name:'Forecast',type:'line',data:mid,smooth:true,symbol:'none',
-                    lineStyle:{color:T.accent,width:2}},
+                {name:'Forecast',type:'line',data:mid,smooth:true,symbol:'circle',symbolSize:4,
+                    lineStyle:{color:T.accent,width:2},itemStyle:{color:T.accent},
+                    markLine:{silent:true,data:[{yAxis:lastPrice,
+                        lineStyle:{color:T.amber,type:'dashed',width:1},
+                        label:{formatter:'Now: '+lastPrice+' F',color:T.amber,fontSize:10}}]}},
                 {name:'Upper',type:'line',data:upper,smooth:true,symbol:'none',
-                    lineStyle:{color:T.amber,width:1,type:'dashed'},
-                    areaStyle:{color:T.amber+'15'},stack:'band'},
+                    lineStyle:{color:T.green,width:1,type:'dashed'},
+                    areaStyle:{color:T.green+'12'},stack:'band'},
                 {name:'Lower',type:'line',data:lower,smooth:true,symbol:'none',
-                    lineStyle:{color:T.amber,width:1,type:'dashed'},stack:'band'},
+                    lineStyle:{color:T.red,width:1,type:'dashed'},stack:'band'},
             ],
         });
     },
