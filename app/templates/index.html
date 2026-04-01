@@ -45,6 +45,10 @@
                     <select id="dash-produit" onchange="ATData.loadPriceChart('chart-price', this.value)" style="padding:4px 8px;font-size:11px">
                         {% for p in produits %}<option value="{{ p.nom }}">{{ p.nom }}</option>{% endfor %}
                     </select>
+                    <select id="dash-marche" onchange="ATData.loadPriceChart('chart-price', document.getElementById('dash-produit').value, this.value)" style="padding:4px 8px;font-size:11px">
+                        <option value="">{{ t.all_markets }}</option>
+                        {% for m in marches %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+                    </select>
                 </div>
             </div>
 

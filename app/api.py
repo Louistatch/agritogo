@@ -24,7 +24,21 @@ def health():
 @api_bp.route("/prix/<produit>")
 def prix(produit):
     marche = request.args.get("marche")
-    data = get_prix_historiques(produit, marche, 20)
+    # Normalize product name — handle accent variants
+    from app.database import get_produits
+    all_prods = {p['nom'].lower().replace('ï','i').replace('é','e').replace('è','e'): p['nom']
+                 for p in get_produits()}
+    normalized = produit.lower().replace('ï','i').replace('é','e').replace('è','e')
+    real_name = all_prods.get(normalized, produit)
+    data = get_prix_historiques(real_name, marche, 60)
+    # Aggregate by date (average across markets) if no specific market
+    if not marche and data:
+        import pandas as pd
+        df = pd.DataFrame(data)
+        agg = df.groupby('date')['prix'].mean().round(0).reset_index()
+        agg['marche'] = 'Moyenne'
+        agg['produit'] = real_name
+        data = agg.to_dict(orient='records')
     return jsonify(data)
 
 

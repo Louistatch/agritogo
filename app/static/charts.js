@@ -450,8 +450,10 @@ const ATData = {
     async loadPriceChart(chartId, produit, marche='') {
         Charts.skeleton(chartId);
         const qs = marche ? `?marche=${encodeURIComponent(marche)}` : '';
-        const data = await this.get(`/prix/${encodeURIComponent(produit)}${qs}`);
-        if (data) Charts.priceLine(chartId, data, produit);
+        const data = await this.get(`/prix/${encodeURIComponent(produit)}${qs}`, 0);
+        if (data && data.length) {
+            Charts.priceLine(chartId, data, produit + (marche ? ` — ${marche}` : ' (avg)'));
+        }
     },
 
     // Dashboard: KPI heatmap + ROI bubble + radar

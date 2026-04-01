@@ -412,11 +412,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Bind chart objects
-    ChartObjects.bindPriceChart('chart-price', 'Mais');
+    ChartObjects.bindPriceChart('chart-price', 'Maïs');
     ChartObjects.bindRiskChart('chart-risk-gauge');
 
     // Auto-refresh price chart every 60s
-    AgentOS.startAutoRefresh('chart-price', '/prix/Mais', 60000);
+    AgentOS.startAutoRefresh('chart-price', '/prix/Ma%C3%AFs', 60000);
 
     // Register intents for drill-down
     AgentOS.registerIntent('chart-price', {
