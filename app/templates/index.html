@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="/static/style.css">
     <script src="/static/charts.js" defer></script>
     <script src="/static/animations.js" defer></script>
+    <script src="/static/thoughts.js" defer></script>
 </head>
 <body>
     <nav class="topnav">
@@ -349,6 +350,16 @@
         function engineAsk(m){var i=document.querySelector('#tab-analyst input[name="question"]');if(i){i.value=m;i.closest('form').querySelector('button[type="submit"]').click()}}
     </script>
     <input type="hidden" id="puter-system-prompt" value="Tu es AgriTogo, Decision Intelligence Engine pour l'agriculture au Togo. Expertise: agronomie, data science, 8+ ans terrain au Togo. Marches: Lome-Adawlato, Kara, Sokode, Atakpame, Dapaong. Cultures: Mais, Riz, Sorgho, Mil, Igname, Manioc, Soja, Arachide. Reponds en {{ 'anglais' if lang=='en' else 'francais' }} uniquement. Format: Analyse > Recommandations > Risques > Prochaines etapes. Termine par: Comment puis-je vous aider davantage sur vos defis agricoles?">
+
+    <!-- Thought Stream Panel -->
+    <div id="thought-panel" class="thought-panel">
+        <div class="thought-panel-header">
+            <span id="thought-indicator" class="thought-indicator"></span>
+            <span class="thought-panel-title">Agent Reasoning</span>
+            <button class="thought-close" onclick="document.getElementById('thought-panel').style.display='none'">×</button>
+        </div>
+        <div class="thought-list"></div>
+    </div>
     </script>
 </body>
 </html>

@@ -597,3 +597,126 @@ tbody tr:nth-child(5) { animation-delay: 0.12s; }
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
 }
+
+/* ── Agent Thought Stream Panel ── */
+.thought-panel {
+    display: none;
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    width: 340px;
+    max-height: 420px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(79,140,255,0.1);
+    z-index: 999;
+    overflow: hidden;
+    transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.thought-panel.thought-active {
+    animation: thoughtSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.thought-panel.thought-fading {
+    opacity: 0;
+    transform: translateY(8px);
+}
+@keyframes thoughtSlideIn {
+    from { opacity: 0; transform: translateY(16px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.thought-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-1);
+}
+.thought-indicator {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    transition: all 0.2s;
+}
+.thought-indicator.pulsing {
+    box-shadow: 0 0 0 4px rgba(79,140,255,0.3);
+    transform: scale(1.3);
+}
+.thought-panel-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-2);
+    flex: 1;
+}
+.thought-close {
+    background: none;
+    border: none;
+    color: var(--text-3);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0 2px;
+    line-height: 1;
+}
+.thought-close:hover { color: var(--text-0); }
+
+.thought-list {
+    max-height: 360px;
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.thought-item {
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: var(--bg-1);
+    border-left: 2px solid transparent;
+    font-size: 11px;
+}
+.thought-thinking  { border-left-color: #4f8cff; }
+.thought-tool_call { border-left-color: #f59e0b; }
+.thought-tool_result { border-left-color: #22c55e; }
+.thought-decision  { border-left-color: #a78bfa; }
+.thought-done      { border-left-color: #22d3ee; }
+
+.thought-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 2px;
+}
+.thought-icon { font-size: 10px; font-weight: 700; }
+.thought-agent {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-2);
+}
+.thought-label {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.thought-ts {
+    font-size: 9px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    margin-left: auto;
+}
+.thought-content {
+    font-size: 11px;
+    color: var(--text-2);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

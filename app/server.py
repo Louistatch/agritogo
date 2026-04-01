@@ -3,7 +3,10 @@
 import os
 import asyncio
 import threading
-from flask import Flask, render_template, request, session
+import queue
+import json
+import time
+from flask import Flask, render_template, request, session, Response, stream_with_context
 
 # Persistent event loop for async agent calls
 _loop = asyncio.new_event_loop()
@@ -15,6 +18,30 @@ def run_async(coro):
     import concurrent.futures
     future = asyncio.run_coroutine_threadsafe(coro, _loop)
     return future.result(timeout=120)
+
+
+# ── Thought Stream (SSE) ──────────────────────────────────
+_thought_queues = {}  # session_id → queue
+
+
+def get_thought_queue(session_id):
+    if session_id not in _thought_queues:
+        _thought_queues[session_id] = queue.Queue(maxsize=100)
+    return _thought_queues[session_id]
+
+
+def emit_thought(session_id, thought_type, content, agent=None):
+    """Push a thought event to the SSE stream."""
+    q = get_thought_queue(session_id)
+    try:
+        q.put_nowait({
+            "type": thought_type,  # "thinking" | "tool_call" | "tool_result" | "decision" | "done"
+            "content": content,
+            "agent": agent or "AgriTogo",
+            "ts": time.time(),
+        })
+    except queue.Full:
+        pass
 
 from dotenv import load_dotenv
 
@@ -55,9 +82,39 @@ def set_lang(lang):
     return "", 204, {"HX-Refresh": "true"}
 
 
+@app.route("/thoughts")
+def thoughts_stream():
+    """SSE endpoint — streams agent reasoning steps to the frontend."""
+    sid = session.get("_id", "default")
+    q = get_thought_queue(sid)
+
+    def generate():
+        yield "data: {\"type\":\"connected\"}\n\n"
+        while True:
+            try:
+                event = q.get(timeout=30)
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get("type") == "done":
+                    break
+            except queue.Empty:
+                yield "data: {\"type\":\"ping\"}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.context_processor
 def inject_i18n():
     lang = session.get("lang", "fr")
+    if "_id" not in session:
+        import uuid
+        session["_id"] = str(uuid.uuid4())[:8]
     return {"t": get_translations(lang), "lang": lang}
 
 
@@ -90,8 +147,11 @@ def chat():
         return ""
     lang = session.get("lang", "fr")
     lang_suffix = get_lang_instruction(lang)
+    sid = session.get("_id", "default")
+    emit_thought(sid, "thinking", f"Processing: {message[:80]}...", "AgriTogo")
     save_conversation("user", message)
     response = run_async(ask_agent(message + lang_suffix, model_choice))
+    emit_thought(sid, "done", "Response ready")
     save_conversation("agent", response)
     conversations = get_conversations()
     return render_template("partials/chat_messages.html", conversations=conversations)
@@ -122,6 +182,9 @@ def ml_interpret():
     module = request.form.get("module", "")
     lang = session.get("lang", "fr")
     lang_suffix = get_lang_instruction(lang)
+    sid = session.get("_id", "default")
+    emit_thought(sid, "thinking", f"Running {module} analysis...", "Quant Agent")
+    emit_thought(sid, "tool_call", f"Module: {module}", "Quant Agent")
 
     # Re-run the module to get full data for the agent
     data_str = ""
@@ -174,6 +237,8 @@ def ml_interpret():
         data_str = f"Module '{module}' not recognized or returned no data."
 
     print(f"[INTERPRET] module={module}, data_len={len(data_str)}")
+    emit_thought(sid, "tool_result", f"Data ready: {len(data_str)} chars", "Quant Agent")
+    emit_thought(sid, "thinking", "Generating interpretation...", "AgriTogo")
 
     prompt = (
         f"Voici les resultats complets du module d'analyse '{module}'. "
@@ -184,6 +249,7 @@ def ml_interpret():
         f"Max 6 phrases.\n\nRESULTATS:\n{data_str}{lang_suffix}"
     )
     response = run_async(ask_agent(prompt))
+    emit_thought(sid, "done", "Interpretation complete")
     header = "Analyse de l'agent" if lang == "fr" else "Agent Analysis"
     return f'<div class="agent-interpretation"><div class="interp-header">{header}</div><div class="response-body">{response}</div></div>'
 
@@ -230,7 +296,11 @@ def engine_query():
         return ""
     lang = session.get("lang", "fr")
     lang_suffix = get_lang_instruction(lang)
+    sid = session.get("_id", "default")
+    emit_thought(sid, "thinking", f"Routing query to specialized agents...", "Coordinator")
     result = run_async(process_query(question + lang_suffix, audience))
+    emit_thought(sid, "decision", result.get("formatted_response", "")[:120] + "...", "Decision Agent")
+    emit_thought(sid, "done", "Analysis complete")
     save_conversation("user", question)
     save_conversation("engine", result.get("formatted_response", ""))
     return render_template("partials/engine_result.html", result=result)
