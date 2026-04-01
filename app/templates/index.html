@@ -6,6 +6,7 @@
     <title>{{ t.site_title }}</title>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
     <script src="https://js.puter.com/v2/"></script>
     <link rel="stylesheet" href="/static/style.css">
     <script src="/static/charts.js" defer></script>
@@ -148,7 +149,23 @@
                 <div class="card">
                     <div class="card-header"><span class="card-title">{{ t.agri_kpi }}</span></div>
                     <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">{{ t.agri_kpi_desc }}</p>
-                    <button hx-post="/ml/kpi" hx-target="#forecast-output" hx-swap="innerHTML" hx-indicator="#forecast-loading" class="btn-sm">{{ t.load_kpi }}</button>
+                    <button hx-post="/ml/kpi" hx-target="#forecast-output" hx-swap="innerHTML" hx-indicator="#forecast-loading" class="btn-sm" onclick="setTimeout(()=>ATData.loadKPICharts(),500)">{{ t.load_kpi }}</button>
+                </div>
+            </div>
+
+            <!-- KPI Charts -->
+            <div class="grid-3 mb-md" id="kpi-charts-row">
+                <div class="card">
+                    <div class="card-header"><span class="card-title">ROI Bubble</span></div>
+                    <div id="chart-roi-bubble" class="chart-container"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Crop Radar</span></div>
+                    <div id="chart-yield-radar" class="chart-container"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">GARCH Forecast</span></div>
+                    <div id="chart-forecast" class="chart-container"></div>
                 </div>
             </div>
             <div id="forecast-loading" class="htmx-indicator">{{ t.running_model }}</div>
@@ -164,13 +181,35 @@
                 <div class="card">
                     <div class="card-header"><span class="card-title">{{ t.fin_risk }}</span></div>
                     <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">{{ t.fin_risk_desc }}</p>
-                    <button hx-post="/ml/risk" hx-target="#risk-output" hx-swap="innerHTML" hx-indicator="#risk-loading" class="btn-sm">{{ t.run_assessment }}</button>
+                    <button hx-post="/ml/risk" hx-target="#risk-output" hx-swap="innerHTML" hx-indicator="#risk-loading" class="btn-sm" onclick="setTimeout(()=>ATData.loadRiskCharts(),500)">{{ t.run_assessment }}</button>
                 </div>
                 <div class="card">
                     <div class="card-header"><span class="card-title">{{ t.farmer_seg }}</span></div>
                     <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">{{ t.farmer_seg_desc }}</p>
-                    <button hx-post="/ml/segmentation" hx-target="#risk-output" hx-swap="innerHTML" hx-indicator="#risk-loading" class="btn-sm">{{ t.run_seg }}</button>
+                    <button hx-post="/ml/segmentation" hx-target="#risk-output" hx-swap="innerHTML" hx-indicator="#risk-loading" class="btn-sm" onclick="setTimeout(()=>ATData.loadSegCharts(),500)">{{ t.run_seg }}</button>
                 </div>
+            </div>
+
+            <!-- Risk Charts -->
+            <div class="grid-3 mb-md" id="risk-charts-row" style="display:none">
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Portfolio Risk Score</span></div>
+                    <div id="chart-risk-gauge" style="height:200px"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Risk by Region</span></div>
+                    <div id="chart-risk-region" class="chart-container"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">3D Risk Map</span></div>
+                    <div id="chart-risk-3d" style="height:220px"></div>
+                </div>
+            </div>
+
+            <!-- Segmentation 3D -->
+            <div class="card mb-md" id="seg-chart-row" style="display:none">
+                <div class="card-header"><span class="card-title">Farmer Clusters — Holographic 3D</span></div>
+                <div id="chart-seg-3d" style="height:320px"></div>
             </div>
             <div id="risk-loading" class="htmx-indicator">{{ t.computing }}</div>
             <div id="risk-output" class="card" style="min-height:60px"></div>
