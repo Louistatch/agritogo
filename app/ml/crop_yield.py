@@ -26,55 +26,65 @@ TARGET = 'hg/ha_yield'
 
 
 def _try_climate_dataset():
-    """Try to load climate_change_impact.csv if available.
-    Cols: Region, Year, Average_Temperature, Precipitation, Crop_Yield, Extreme_Weather_Events
+    """Load climate_change_impact_on_agriculture_2024.csv.
+    Cols: Year, Country, Region, Crop_Type, Average_Temperature_C,
+          Total_Precipitation_mm, CO2_Emissions_MT, Crop_Yield_MT_per_HA,
+          Extreme_Weather_Events, Irrigation_Access_%, Pesticide_Use_KG_per_HA,
+          Fertilizer_Use_KG_per_HA, Soil_Health_Index, Adaptation_Strategies,
+          Economic_Impact_Million_USD
     """
-    for fname in ['climate_change_impact.csv', 'climate_change_impact_on_agriculture_2024.csv',
-                  'climate_impact.csv', 'climate_agriculture.csv']:
+    for fname in [
+        'climate_change_impact_on_agriculture_2024.csv',
+        'climate_change_impact.csv',
+        'climate_impact.csv',
+    ]:
         path = os.path.join(DATA_DIR, fname)
         if os.path.exists(path):
             df = pd.read_csv(path)
-            df.columns = [c.strip() for c in df.columns]
-            # Normalize column names
-            col_map = {}
-            for c in df.columns:
-                cl = c.lower().replace(' ', '_')
-                if 'temperature' in cl: col_map[c] = 'avg_temp'
-                elif 'precipitation' in cl or 'rainfall' in cl: col_map[c] = 'average_rain_fall_mm_per_year'
-                elif 'crop_yield' in cl or 'yield' in cl: col_map[c] = 'hg/ha_yield'
-                elif 'extreme' in cl: col_map[c] = 'extreme_weather'
-                elif 'region' in cl: col_map[c] = 'region'
-                elif 'year' in cl: col_map[c] = 'Year'
-            df = df.rename(columns=col_map)
-            # Convert yield to hg/ha if it's in t/ha (values < 100 suggest t/ha)
-            if 'hg/ha_yield' in df.columns and df['hg/ha_yield'].mean() < 100:
+            # Map to internal column names
+            df = df.rename(columns={
+                'Average_Temperature_C': 'avg_temp',
+                'Total_Precipitation_mm': 'average_rain_fall_mm_per_year',
+                'Pesticide_Use_KG_per_HA': 'pesticides_tonnes',
+                'Crop_Yield_MT_per_HA': 'hg/ha_yield',
+                'Extreme_Weather_Events': 'extreme_weather',
+                'Fertilizer_Use_KG_per_HA': 'fertilizer_kg_ha',
+                'Soil_Health_Index': 'soil_health',
+                'Crop_Type': 'crop_type',
+            })
+            # Convert yield from MT/ha to hg/ha (1 MT/ha = 10000 hg/ha)
+            if 'hg/ha_yield' in df.columns:
                 df['hg/ha_yield'] = df['hg/ha_yield'] * 10000
-            # Add pesticides_tonnes if missing
-            if 'pesticides_tonnes' not in df.columns:
-                np.random.seed(42)
-                df['pesticides_tonnes'] = np.random.uniform(10, 200, len(df))
-            df['crop'] = 'Mais'  # climate dataset is generic
+            # Map crop types to French names
+            crop_map = {
+                'Corn': 'Mais', 'Maize': 'Mais', 'Rice': 'Riz',
+                'Wheat': 'Riz',  # proxy
+                'Soybeans': 'Soja', 'Soybean': 'Soja',
+                'Cassava': 'Manioc', 'Yam': 'Igname', 'Yams': 'Igname',
+                'Sorghum': 'Sorgho',
+            }
+            df['crop'] = df['crop_type'].map(crop_map).fillna('Mais')
+            np.random.seed(42)
+            df['region'] = np.random.choice(REGIONS, len(df))
             return df
     return None
 
 
 def _load_data():
-    # Try climate dataset first
+    """Load datasets separately. Climate dataset for generic crops, yield_df for specific crops."""
     climate_df = _try_climate_dataset()
-    if climate_df is not None and len(climate_df) > 100:
-        climate_df = climate_df.dropna(subset=['avg_temp', 'average_rain_fall_mm_per_year', 'hg/ha_yield'])
+    try:
+        yld = pd.read_csv(os.path.join(DATA_DIR, 'archive1', 'yield_df.csv'))
+        yld = yld[yld['Item'].isin(CROPS_EN)].dropna(subset=FEATURES + [TARGET])
         np.random.seed(42)
-        if 'region' not in climate_df.columns:
-            climate_df['region'] = np.random.choice(REGIONS, len(climate_df))
-        return climate_df
+        yld = yld.copy()
+        yld['region'] = np.random.choice(REGIONS, len(yld))
+        yld['crop'] = yld['Item'].map(CROP_FR)
+    except Exception:
+        yld = None
 
-    # Fallback: yield_df.csv
-    df = pd.read_csv(os.path.join(DATA_DIR, 'archive1', 'yield_df.csv'))
-    df = df[df['Item'].isin(CROPS_EN)].dropna(subset=FEATURES + [TARGET])
-    np.random.seed(42)
-    df = df.copy()
-    df['region'] = np.random.choice(REGIONS, len(df))
-    df['crop'] = df['Item'].map(CROP_FR)
+    # Return both separately as a tuple
+    return climate_df, yld
     return df
 
 
@@ -100,25 +110,36 @@ def get_available_crops():
 
 
 def run_crop_yield_prediction(crop="Mais"):
-    """Train RF + XGBoost on a single crop. Returns metrics and region breakdown."""
+    """Train RF + XGBoost. Uses yield_df for per-crop models, climate dataset for climate features."""
     try:
-        all_data = _load_data()
-        # If climate dataset loaded (generic), use all data
-        if 'Item' not in all_data.columns:
-            data = all_data.copy()
-            data['crop'] = crop
-        else:
+        climate_df, yld_df = _load_data()
+
+        # Use yield_df for per-crop (better R²)
+        if yld_df is not None:
             en_name = CROP_EN.get(crop, "Maize")
-            data = all_data[all_data['Item'] == en_name].copy()
+            data = yld_df[yld_df['Item'] == en_name].copy()
             if len(data) < 50:
                 raise ValueError(f"Not enough data for {crop}")
+            # Enrich with climate features if available
+            if climate_df is not None:
+                climate_crop = climate_df[climate_df['crop'] == crop].copy()
+                for extra in ['extreme_weather', 'fertilizer_kg_ha', 'soil_health']:
+                    if extra in climate_crop.columns and extra not in data.columns:
+                        data[extra] = climate_crop[extra].mean()
+        elif climate_df is not None:
+            data = climate_df[climate_df['crop'] == crop].copy()
+            if len(data) < 50:
+                data = climate_df.copy()
+        else:
+            raise ValueError("No data")
     except Exception:
         data = _synthetic(crop)
 
-    # Use extreme_weather as extra feature if available
+    # Use extra features if available from climate dataset
     feat = FEATURES.copy()
-    if 'extreme_weather' in data.columns:
-        feat = feat + ['extreme_weather']
+    for extra in ['extreme_weather', 'fertilizer_kg_ha', 'soil_health']:
+        if extra in data.columns:
+            feat.append(extra)
 
     X, y = data[feat].fillna(data[feat].median()), data[TARGET]
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42)
