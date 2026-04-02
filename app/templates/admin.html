@@ -6,126 +6,325 @@
     <title>AgriTogo Admin</title>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .module-card { border-left: 3px solid var(--accent); margin-bottom: 16px; }
+        .module-card.risk-module { border-left-color: var(--red); }
+        .module-card.garch-module { border-left-color: var(--amber); }
+        .module-card.seg-module { border-left-color: var(--purple); }
+        .module-card.kpi-module { border-left-color: var(--green); }
+        .module-card.price-module { border-left-color: var(--cyan); }
+        .module-badge { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 3px; background: var(--bg-1); border: 1px solid var(--border); }
+        .data-source-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+        .data-source-row:last-child { border-bottom: none; }
+        .source-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .source-ok { background: var(--green); }
+        .source-missing { background: var(--red); }
+        .source-label { flex: 1; color: var(--text-2); }
+        .source-action { font-size: 11px; }
+        .admin-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+        .admin-tab { padding: 8px 16px; font-size: 12px; font-weight: 500; color: var(--text-3); cursor: pointer; border-bottom: 2px solid transparent; background: none; border-top: none; border-left: none; border-right: none; font-family: var(--font); transition: all 0.15s; }
+        .admin-tab.active { color: var(--text-0); border-bottom-color: var(--accent); }
+        .admin-panel { display: none; }
+        .admin-panel.active { display: block; }
+    </style>
 </head>
 <body>
     <nav class="topnav">
         <a href="/admin" class="topnav-logo">AgriTogo <span>Administration</span></a>
-        <div class="topnav-links">
-            <a href="/">Platform</a>
-        </div>
+        <div class="topnav-links"><a href="/">Platform</a></div>
     </nav>
 
     <div class="container">
         <!-- Stats -->
-        <div class="section-header"><div class="section-title">Database Overview</div></div>
-        <div id="admin-stats">{% include "partials/admin_stats.html" %}</div>
+        <div id="admin-stats" style="margin-bottom:16px">{% include "partials/admin_stats.html" %}</div>
 
-        <div class="grid-2 mb-lg" style="margin-top:12px">
-            <!-- Data Files Status -->
-            <div class="card">
-                <div class="card-header"><span class="card-title">ML Dataset Files</span></div>
-                <table>
-                    <thead><tr><th>Dataset</th><th>Module</th><th>Status</th><th>Upload</th></tr></thead>
-                    <tbody>
-                    {% for name, target, module in [
-                        ("yield_df.csv", "archive1/yield_df.csv", "Crop Yield"),
-                        ("Core_TimeSeries.csv", "Core_TimeSeries.csv", "GARCH"),
-                        ("AgriRiskFin_Dataset.csv", "AgriRiskFin_Dataset.csv", "Risk"),
-                        ("data2.xlsx", "Copy of data2(1).xlsx", "KPI"),
-                        ("rainfall.csv", "archive1/rainfall.csv", "Segmentation"),
-                        ("temp.csv", "archive1/temp.csv", "Segmentation"),
-                    ] %}
-                    <tr>
-                        <td>{{ name }}</td>
-                        <td>{{ module }}</td>
-                        <td>{% if data_files.get(name.split('.')[0].replace('data2','data2_excel'), false) %}<span class="risk-low">Available</span>{% else %}<span class="risk-high">Missing</span>{% endif %}</td>
-                        <td>
-                            <form hx-post="/admin/upload/dataset" hx-target="#upload-msg" hx-swap="innerHTML" hx-encoding="multipart/form-data" style="display:flex;gap:4px">
-                                <input type="hidden" name="target" value="{{ target }}">
-                                <input type="file" name="file" style="width:120px;font-size:10px">
+        <!-- Admin Tabs -->
+        <div class="admin-tabs">
+            <button class="admin-tab active" onclick="showAdminPanel('modules')">ML Modules & Data</button>
+            <button class="admin-tab" onclick="showAdminPanel('kobo')">KoboCollect</button>
+            <button class="admin-tab" onclick="showAdminPanel('database')">Database</button>
+        </div>
+
+        <!-- Panel 1: ML Modules -->
+        <div id="admin-modules" class="admin-panel active">
+            <div class="section-header" style="margin-bottom:12px">
+                <div class="section-title">Data Sources by ML Module</div>
+                <div class="section-subtitle">Each module requires specific datasets. Upload missing files or connect external APIs.</div>
+            </div>
+
+            <!-- Module 1: Crop Yield -->
+            <div class="card module-card">
+                <div class="card-header">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <span class="card-title">Crop Yield Prediction</span>
+                        <span class="module-badge">Random Forest + XGBoost</span>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">Required data sources:</p>
+                        <div class="data-source-row">
+                            <span class="source-status {{ 'source-ok' if data_files.get('yield_df') else 'source-missing' }}"></span>
+                            <span class="source-label">yield_df.csv — Crop yields by country/year</span>
+                            <form hx-post="/admin/upload/dataset" hx-target="#upload-msg-yield" hx-encoding="multipart/form-data" class="source-action" style="display:flex;gap:4px">
+                                <input type="hidden" name="target" value="archive1/yield_df.csv">
+                                <input type="file" name="file" style="width:100px;font-size:10px">
                                 <button type="submit" class="btn-sm">Upload</button>
                             </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-                <div id="upload-msg" style="margin-top:6px"></div>
+                        </div>
+                        <div class="data-source-row">
+                            <span class="source-status {{ 'source-ok' if data_files.get('rainfall') else 'source-missing' }}"></span>
+                            <span class="source-label">rainfall.csv — Annual rainfall by area</span>
+                            <form hx-post="/admin/upload/dataset" hx-target="#upload-msg-yield" hx-encoding="multipart/form-data" class="source-action" style="display:flex;gap:4px">
+                                <input type="hidden" name="target" value="archive1/rainfall.csv">
+                                <input type="file" name="file" style="width:100px;font-size:10px">
+                                <button type="submit" class="btn-sm">Upload</button>
+                            </form>
+                        </div>
+                        <div class="data-source-row">
+                            <span class="source-status {{ 'source-ok' if data_files.get('temp') else 'source-missing' }}"></span>
+                            <span class="source-label">temp.csv — Average temperature by country</span>
+                            <form hx-post="/admin/upload/dataset" hx-target="#upload-msg-yield" hx-encoding="multipart/form-data" class="source-action" style="display:flex;gap:4px">
+                                <input type="hidden" name="target" value="archive1/temp.csv">
+                                <input type="file" name="file" style="width:100px;font-size:10px">
+                                <button type="submit" class="btn-sm">Upload</button>
+                            </form>
+                        </div>
+                        <div id="upload-msg-yield"></div>
+                    </div>
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">Collect from farmers (KoboCollect):</p>
+                        <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Fields: region, crop, farm size, yield, temperature, rainfall, pesticides, fertilizer, soil health, extreme weather events</p>
+                        <a href="/admin/kobo/xlsform/yield" class="export-btn">Download Yield Survey Form (.xlsx)</a>
+                    </div>
+                </div>
             </div>
 
-            <!-- KoboCollect -->
-            <div class="card">
+            <!-- Module 2: GARCH Volatility -->
+            <div class="card module-card garch-module">
                 <div class="card-header">
-                    <span class="card-title">KoboCollect Integration</span>
-                    {% if kobo_cfg %}<span style="font-size:10px;color:var(--green)">Connected</span>{% endif %}
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <span class="card-title">GARCH Volatility Forecasting</span>
+                        <span class="module-badge" style="border-color:var(--amber);color:var(--amber)">Time Series</span>
+                    </div>
                 </div>
+                <div class="grid-2">
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">Required data sources:</p>
+                        <div class="data-source-row">
+                            <span class="source-status {{ 'source-ok' if data_files.get('Core_TimeSeries') else 'source-missing' }}"></span>
+                            <span class="source-label">Core_TimeSeries.csv — Financial time series (30,000 rows)</span>
+                            <form hx-post="/admin/upload/dataset" hx-target="#upload-msg-garch" hx-encoding="multipart/form-data" class="source-action" style="display:flex;gap:4px">
+                                <input type="hidden" name="target" value="Core_TimeSeries.csv">
+                                <input type="file" name="file" style="width:100px;font-size:10px">
+                                <button type="submit" class="btn-sm">Upload</button>
+                            </form>
+                        </div>
+                        <div id="upload-msg-garch"></div>
+                        <p style="font-size:11px;color:var(--text-3);margin-top:8px">External APIs (auto-fetch):</p>
+                        <div class="data-source-row">
+                            <span class="source-status source-ok"></span>
+                            <span class="source-label">Local price DB — 720 entries across 5 markets</span>
+                        </div>
+                    </div>
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">Collect market prices (KoboCollect):</p>
+                        <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Fields: market, product, price/kg, min/max price, volume, supply level, demand level, quality, origin region</p>
+                        <a href="/admin/kobo/xlsform/market" class="export-btn">Download Market Price Form (.xlsx)</a>
+                    </div>
+                </div>
+            </div>
 
-                <form hx-post="/admin/kobo/config" hx-target="#kobo-status" hx-swap="innerHTML" style="margin-bottom:10px">
+            <!-- Module 3: Financial Risk -->
+            <div class="card module-card risk-module">
+                <div class="card-header">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <span class="card-title">Financial Risk Assessment</span>
+                        <span class="module-badge" style="border-color:var(--red);color:var(--red)">Random Forest Classifier</span>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">Required data sources:</p>
+                        <div class="data-source-row">
+                            <span class="source-status {{ 'source-ok' if data_files.get('AgriRiskFin') else 'source-missing' }}"></span>
+                            <span class="source-label">AgriRiskFin_Dataset.csv — 4,981 loan dossiers</span>
+                            <form hx-post="/admin/upload/dataset" hx-target="#upload-msg-risk" hx-encoding="multipart/form-data" class="source-action" style="display:flex;gap:4px">
+                                <input type="hidden" name="target" value="AgriRiskFin_Dataset.csv">
+                                <input type="file" name="file" style="width:100px;font-size:10px">
+                                <button type="submit" class="btn-sm">Upload</button>
+                            </form>
+                        </div>
+                        <div id="upload-msg-risk"></div>
+                    </div>
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">Collect from farmers (KoboCollect):</p>
+                        <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Fields: region, enterprise size, annual revenue/expenses, loan amount/duration, previous default, debt ratio, drought/flood risk perception, insurance</p>
+                        <a href="/admin/kobo/xlsform/risk_form" class="export-btn">Download Risk Assessment Form (.xlsx)</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Module 4: Farmer Segmentation -->
+            <div class="card module-card seg-module">
+                <div class="card-header">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <span class="card-title">Farmer Segmentation</span>
+                        <span class="module-badge" style="border-color:var(--purple);color:var(--purple)">K-Means + PCA</span>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">Required data sources (merged):</p>
+                        <div class="data-source-row">
+                            <span class="source-status {{ 'source-ok' if data_files.get('yield_df') else 'source-missing' }}"></span>
+                            <span class="source-label">yield_df.csv + rainfall.csv + temp.csv (merged on Area+Year)</span>
+                        </div>
+                    </div>
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">Collect farmer profiles (KoboCollect):</p>
+                        <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Fields: farmer name, region, farm size, main/secondary crop, annual revenue, irrigation, insurance, years experience, storage capacity, distance to market</p>
+                        <a href="/admin/kobo/xlsform/farmer" class="export-btn">Download Farmer Profile Form (.xlsx)</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Module 5: KPI Dashboard -->
+            <div class="card module-card kpi-module">
+                <div class="card-header">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <span class="card-title">Agriculture KPI Dashboard</span>
+                        <span class="module-badge" style="border-color:var(--green);color:var(--green)">Regional Analytics</span>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">Required data sources:</p>
+                        <div class="data-source-row">
+                            <span class="source-status {{ 'source-ok' if data_files.get('data2_excel') else 'source-missing' }}"></span>
+                            <span class="source-label">data2.xlsx — Yield, fertilizer, rainfall, MaxTemp by state/year</span>
+                            <form hx-post="/admin/upload/dataset" hx-target="#upload-msg-kpi" hx-encoding="multipart/form-data" class="source-action" style="display:flex;gap:4px">
+                                <input type="hidden" name="target" value="Copy of data2(1).xlsx">
+                                <input type="file" name="file" style="width:100px;font-size:10px">
+                                <button type="submit" class="btn-sm">Upload</button>
+                            </form>
+                        </div>
+                        <div id="upload-msg-kpi"></div>
+                    </div>
+                    <div>
+                        <p style="font-size:11px;color:var(--text-3);margin-bottom:8px">External data sources:</p>
+                        <div class="data-source-row">
+                            <span class="source-status source-ok"></span>
+                            <span class="source-label">Togo Adapter — Regional climate parameters (built-in)</span>
+                        </div>
+                        <div class="data-source-row">
+                            <span class="source-status source-missing"></span>
+                            <span class="source-label">FAO GIEWS API — Real-time food security data</span>
+                            <a href="https://www.fao.org/giews/en/" target="_blank" class="export-btn" style="font-size:10px">Get API</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel 2: KoboCollect -->
+        <div id="admin-kobo" class="admin-panel">
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">KoboCollect API Connection</span>
+                        {% if kobo_cfg %}<span style="font-size:10px;color:var(--green)">Connected</span>{% endif %}
+                    </div>
+                    <form hx-post="/admin/kobo/config" hx-target="#kobo-status" hx-swap="innerHTML" style="margin-bottom:10px">
+                        <div style="display:flex;flex-direction:column;gap:6px">
+                            <input type="text" name="kobo_url" placeholder="Server URL (e.g. https://kf.kobotoolbox.org)" value="{{ kobo_cfg.base_url if kobo_cfg else '' }}" style="width:100%">
+                            <input type="text" name="kobo_token" placeholder="API Token" value="{{ kobo_cfg.token if kobo_cfg else '' }}" style="width:100%">
+                            <button type="submit" class="btn-sm">Save and Test</button>
+                        </div>
+                    </form>
+                    <div id="kobo-status"></div>
+                    {% if kobo_cfg %}
+                    <div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+                        <div class="card-title" style="margin-bottom:6px">Deployed Forms</div>
+                        <div id="kobo-forms" hx-get="/admin/kobo/forms" hx-trigger="load" hx-swap="innerHTML"></div>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">XLSForm Templates</span></div>
+                    <p style="font-size:11px;color:var(--text-3);margin-bottom:10px">Download and import into KoboToolbox to deploy data collection forms on mobile devices.</p>
                     <div style="display:flex;flex-direction:column;gap:6px">
-                        <input type="text" name="kobo_url" placeholder="Server URL (e.g. https://kf.kobotoolbox.org)" value="{{ kobo_cfg.base_url if kobo_cfg else '' }}" style="width:100%">
-                        <input type="text" name="kobo_token" placeholder="API Token" value="{{ kobo_cfg.token if kobo_cfg else '' }}" style="width:100%">
-                        <button type="submit" class="btn-sm">Save and Test Connection</button>
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+                            <div><div style="font-size:12px;font-weight:600">Market Price Survey</div><div style="font-size:10px;color:var(--text-3)">15 fields — price, volume, supply/demand, quality</div></div>
+                            <a href="/admin/kobo/xlsform/market" class="export-btn">Download</a>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+                            <div><div style="font-size:12px;font-weight:600">Crop Yield Survey</div><div style="font-size:10px;color:var(--text-3)">15 fields — yield, climate, soil, irrigation, season</div></div>
+                            <a href="/admin/kobo/xlsform/yield" class="export-btn">Download</a>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+                            <div><div style="font-size:12px;font-weight:600">Financial Risk Survey</div><div style="font-size:10px;color:var(--text-3)">15 fields — revenue, loans, risk perception, insurance</div></div>
+                            <a href="/admin/kobo/xlsform/risk_form" class="export-btn">Download</a>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+                            <div><div style="font-size:12px;font-weight:600">Farmer Profile Survey</div><div style="font-size:10px;color:var(--text-3)">12 fields — farm size, crops, revenue, storage</div></div>
+                            <a href="/admin/kobo/xlsform/farmer" class="export-btn">Download</a>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+                            <div><div style="font-size:12px;font-weight:600">Basic Price Survey</div><div style="font-size:10px;color:var(--text-3)">8 fields — simple price collection</div></div>
+                            <a href="/admin/kobo/xlsform/price" class="export-btn">Download</a>
+                        </div>
                     </div>
-                </form>
-                <div id="kobo-status"></div>
-
-                {% if kobo_cfg %}
-                <div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
-                    <div class="card-title" style="margin-bottom:6px">Forms</div>
-                    <div id="kobo-forms" hx-get="/admin/kobo/forms" hx-trigger="load" hx-swap="innerHTML"></div>
-                </div>
-                {% endif %}
-
-                <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px">
-                    <div class="card-title" style="margin-bottom:6px">XLSForm Templates</div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap">
-                        <a href="/admin/kobo/xlsform/price" class="export-btn">Download Price Survey (.xlsx)</a>
-                        <a href="/admin/kobo/xlsform/farmer" class="export-btn">Download Farmer Profile (.xlsx)</a>
-                    </div>
-                    <p style="font-size:10px;color:var(--text-3);margin-top:4px">Import these .xlsx files directly into KoboToolbox to deploy data collection forms.</p>
                 </div>
             </div>
         </div>
 
-        <div class="grid-2 mb-lg">
-            <!-- CSV Import -->
-            <div class="card">
-                <div class="card-header"><span class="card-title">Import Data (CSV)</span></div>
-                <div class="upload-section">
-                    <h3>Price Data</h3>
-                    <p class="hint">Format: date,produit,marche,prix</p>
-                    <form hx-post="/admin/upload/prix" hx-target="#admin-stats" hx-swap="innerHTML" hx-encoding="multipart/form-data" style="display:flex;gap:6px">
-                        <input type="file" name="file" accept=".csv"><button type="submit" class="btn-sm">Import</button>
-                    </form>
+        <!-- Panel 3: Database -->
+        <div id="admin-database" class="admin-panel">
+            <div class="grid-2 mb-lg">
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Import CSV Data</span></div>
+                    <div class="upload-section">
+                        <h3>Price Data</h3>
+                        <p class="hint">Format: date,produit,marche,prix</p>
+                        <form hx-post="/admin/upload/prix" hx-target="#admin-stats" hx-swap="innerHTML" hx-encoding="multipart/form-data" style="display:flex;gap:6px">
+                            <input type="file" name="file" accept=".csv"><button type="submit" class="btn-sm">Import</button>
+                        </form>
+                    </div>
+                    <div class="upload-section">
+                        <h3>Products</h3>
+                        <p class="hint">Format: nom,unite,categorie</p>
+                        <form hx-post="/admin/upload/produits" hx-target="#admin-produits" hx-swap="innerHTML" hx-encoding="multipart/form-data" style="display:flex;gap:6px">
+                            <input type="file" name="file" accept=".csv"><button type="submit" class="btn-sm">Import</button>
+                        </form>
+                    </div>
+                    <a href="/admin/export/prix" class="export-btn">Export All Prices (CSV)</a>
                 </div>
-                <div class="upload-section">
-                    <h3>Products</h3>
-                    <p class="hint">Format: nom,unite,categorie</p>
-                    <form hx-post="/admin/upload/produits" hx-target="#admin-produits" hx-swap="innerHTML" hx-encoding="multipart/form-data" style="display:flex;gap:6px">
-                        <input type="file" name="file" accept=".csv"><button type="submit" class="btn-sm">Import</button>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Products</span></div>
+                    <form hx-post="/admin/produit/add" hx-target="#admin-produits" hx-swap="innerHTML" class="add-form">
+                        <input type="text" name="nom" placeholder="Product name" required style="flex:1">
+                        <select name="unite"><option>kg</option><option>tonne</option><option>sac</option></select>
+                        <select name="categorie"><option>cereale</option><option>legumineuse</option><option>tubercule</option><option>maraicher</option></select>
+                        <button type="submit" class="btn-sm">Add</button>
                     </form>
+                    <div id="admin-produits">{% include "partials/admin_produits.html" %}</div>
                 </div>
-                <div style="margin-top:8px"><a href="/admin/export/prix" class="export-btn">Export All Prices (CSV)</a></div>
             </div>
-
-            <!-- Product Management -->
             <div class="card">
-                <div class="card-header"><span class="card-title">Products</span></div>
-                <form hx-post="/admin/produit/add" hx-target="#admin-produits" hx-swap="innerHTML" class="add-form">
-                    <input type="text" name="nom" placeholder="Product name" required style="flex:1">
-                    <select name="unite"><option>kg</option><option>tonne</option><option>sac</option></select>
-                    <select name="categorie"><option>cereale</option><option>legumineuse</option><option>tubercule</option><option>maraicher</option></select>
-                    <button type="submit" class="btn-sm">Add</button>
-                </form>
-                <div id="admin-produits">{% include "partials/admin_produits.html" %}</div>
+                <div class="card-header"><span class="card-title">Price Data (Paginated)</span></div>
+                <div id="admin-prix" hx-get="/admin/prix" hx-trigger="load" hx-swap="innerHTML"></div>
             </div>
-        </div>
-
-        <!-- Price Data Table -->
-        <div class="card mb-lg">
-            <div class="card-header"><span class="card-title">Price Data (Paginated)</span></div>
-            <div id="admin-prix" hx-get="/admin/prix" hx-trigger="load" hx-swap="innerHTML"></div>
         </div>
     </div>
+
+    <script>
+        function showAdminPanel(name) {
+            document.querySelectorAll('.admin-panel').forEach(function(p){ p.classList.remove('active'); });
+            document.querySelectorAll('.admin-tab').forEach(function(t){ t.classList.remove('active'); });
+            document.getElementById('admin-'+name).classList.add('active');
+            if(event && event.target) event.target.classList.add('active');
+        }
+    </script>
 </body>
 </html>

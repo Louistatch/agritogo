@@ -10,7 +10,8 @@ from app.database import (
 from app.kobo import (
     save_kobo_config, load_kobo_config, KoboClient,
     generate_price_survey_xlsform, generate_farmer_survey_xlsform,
-    xlsform_to_xlsx,
+    generate_crop_yield_form, generate_financial_risk_form,
+    generate_market_price_form, xlsform_to_xlsx,
 )
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin", template_folder="templates")
@@ -165,6 +166,15 @@ def admin_download_xlsform(form_type):
     if form_type == "price":
         form = generate_price_survey_xlsform()
         name = "agritogo_price_survey.xlsx"
+    elif form_type == "yield":
+        form = generate_crop_yield_form()
+        name = "agritogo_yield_survey.xlsx"
+    elif form_type == "risk_form":
+        form = generate_financial_risk_form()
+        name = "agritogo_financial_risk_survey.xlsx"
+    elif form_type == "market":
+        form = generate_market_price_form()
+        name = "agritogo_market_price_survey.xlsx"
     else:
         form = generate_farmer_survey_xlsform()
         name = "agritogo_farmer_survey.xlsx"

@@ -111,6 +111,126 @@ def generate_farmer_survey_xlsform() -> dict:
             "title": "AgriTogo - Profil Agriculteur", "form_id": "agritogo_farmer"}
 
 
+def generate_crop_yield_form() -> dict:
+    """Génère un XLSForm pour la collecte de données de rendement (module ML crop_yield)."""
+    regions = ["Maritime", "Plateaux", "Centrale", "Kara", "Savanes"]
+    crops = ["Mais", "Riz", "Sorgho", "Mil", "Igname", "Manioc", "Soja", "Arachide"]
+    soil_health = ["poor", "average", "good", "excellent"]
+    yn = ["yes", "no"]
+    seasons = ["grande_saison", "petite_saison", "saison_seche"]
+
+    def _f(t, n, l, req="yes", c=""):
+        return {"type": t, "name": n, "label": l, "required": req, "constraint": c}
+
+    survey = [
+        _f("text", "farmer_id", "Identifiant agriculteur"),
+        _f("select_one region", "region", "Région"),
+        _f("select_one crop", "crop_type", "Culture principale"),
+        _f("decimal", "farm_size_ha", "Superficie cultivée (ha)", c=". > 0"),
+        _f("decimal", "yield_kg_ha", "Rendement obtenu (kg/ha)", c=". > 0"),
+        _f("decimal", "avg_temperature_c", "Température moyenne observée (°C)"),
+        _f("decimal", "rainfall_mm", "Pluviométrie estimée (mm)"),
+        _f("decimal", "pesticides_kg_ha", "Pesticides utilisés (kg/ha)"),
+        _f("decimal", "fertilizer_kg_ha", "Engrais utilisés (kg/ha)"),
+        _f("select_one soil_health", "soil_health_score", "Qualité du sol"),
+        _f("integer", "extreme_weather_events", "Événements météo extrêmes (nombre)"),
+        _f("select_one yn", "irrigation_access", "Accès à l'irrigation"),
+        _f("select_one season", "season", "Saison de culture"),
+        _f("geopoint", "gps_location", "Position GPS", req="no"),
+        _f("text", "notes", "Observations", req="no"),
+    ]
+    choices = (
+        [{"list_name": "region", "name": r, "label": r} for r in regions]
+        + [{"list_name": "crop", "name": c, "label": c} for c in crops]
+        + [{"list_name": "soil_health", "name": s, "label": s} for s in soil_health]
+        + [{"list_name": "yn", "name": v, "label": v} for v in yn]
+        + [{"list_name": "season", "name": s, "label": s} for s in seasons]
+    )
+    return {"survey": survey, "choices": choices,
+            "title": "AgriTogo - Collecte Rendement", "form_id": "agritogo_yield"}
+
+
+def generate_financial_risk_form() -> dict:
+    """Génère un XLSForm pour l'évaluation du risque financier (module ML financial_risk)."""
+    regions = ["Maritime", "Plateaux", "Centrale", "Kara", "Savanes"]
+    enterprise_sizes = ["Small", "Medium", "Large"]
+    yn = ["yes", "no"]
+    risk_levels = ["low", "medium", "high"]
+    crops = ["Mais", "Riz", "Sorgho", "Mil", "Igname", "Manioc", "Soja", "Arachide"]
+
+    def _f(t, n, l, req="yes", c=""):
+        return {"type": t, "name": n, "label": l, "required": req, "constraint": c}
+
+    survey = [
+        _f("text", "farmer_id", "Identifiant agriculteur"),
+        _f("select_one region", "region", "Région"),
+        _f("select_one enterprise_size", "enterprise_size", "Taille de l'exploitation"),
+        _f("integer", "annual_revenue_fcfa", "Revenu annuel (FCFA)"),
+        _f("integer", "annual_expenses_fcfa", "Dépenses annuelles (FCFA)"),
+        _f("integer", "loan_amount_fcfa", "Montant du prêt (FCFA)"),
+        _f("integer", "loan_duration_months", "Durée du prêt (mois)"),
+        _f("select_one yn", "has_previous_default", "Défaut de paiement antérieur"),
+        _f("decimal", "debt_to_equity_ratio", "Ratio dette/fonds propres"),
+        _f("select_one risk_level", "drought_risk_perception", "Risque sécheresse perçu"),
+        _f("select_one risk_level", "flood_risk_perception", "Risque inondation perçu"),
+        _f("select_one yn", "has_insurance", "Assurance agricole"),
+        _f("select_one crop", "main_crop", "Culture principale"),
+        _f("integer", "years_farming", "Années d'expérience"),
+        _f("geopoint", "gps_location", "Position GPS", req="no"),
+    ]
+    choices = (
+        [{"list_name": "region", "name": r, "label": r} for r in regions]
+        + [{"list_name": "enterprise_size", "name": s, "label": s} for s in enterprise_sizes]
+        + [{"list_name": "yn", "name": v, "label": v} for v in yn]
+        + [{"list_name": "risk_level", "name": r, "label": r} for r in risk_levels]
+        + [{"list_name": "crop", "name": c, "label": c} for c in crops]
+    )
+    return {"survey": survey, "choices": choices,
+            "title": "AgriTogo - Risque Financier", "form_id": "agritogo_risk"}
+
+
+def generate_market_price_form() -> dict:
+    """Génère un XLSForm amélioré pour la collecte de prix (module GARCH/graphiques prix)."""
+    markets = ["Lome-Adawlato", "Kara", "Sokode", "Atakpame", "Dapaong"]
+    products = ["Mais", "Riz_local", "Sorgho", "Mil", "Haricot", "Soja",
+                "Arachide", "Igname", "Manioc", "Tomate", "Piment", "Oignon"]
+    supply_levels = ["low", "medium", "high", "abundant"]
+    demand_levels = ["low", "medium", "high", "very_high"]
+    quality_levels = ["poor", "average", "good", "excellent"]
+    origin_regions = ["Maritime", "Plateaux", "Centrale", "Kara", "Savanes", "Import"]
+
+    def _f(t, n, l, req="yes", c=""):
+        return {"type": t, "name": n, "label": l, "required": req, "constraint": c}
+
+    survey = [
+        _f("text", "collector_id", "Identifiant collecteur"),
+        _f("date", "collection_date", "Date de collecte"),
+        _f("select_one market", "market", "Marché"),
+        _f("select_one product", "product", "Produit"),
+        _f("decimal", "price_fcfa_kg", "Prix (FCFA/kg)", c=". > 0"),
+        _f("decimal", "price_min_fcfa", "Prix minimum observé"),
+        _f("decimal", "price_max_fcfa", "Prix maximum observé"),
+        _f("decimal", "volume_available_kg", "Volume disponible (kg)"),
+        _f("select_one supply_level", "supply_level", "Niveau d'offre"),
+        _f("select_one demand_level", "demand_level", "Niveau de demande"),
+        _f("select_one quality", "quality", "Qualité du produit"),
+        _f("select_one origin_region", "origin_region", "Région d'origine"),
+        _f("decimal", "transport_cost_fcfa", "Coût transport (FCFA)", req="no"),
+        _f("geopoint", "gps_location", "Position GPS", req="no"),
+        _f("text", "notes", "Observations", req="no"),
+    ]
+    choices = (
+        [{"list_name": "market", "name": m, "label": m} for m in markets]
+        + [{"list_name": "product", "name": p, "label": p} for p in products]
+        + [{"list_name": "supply_level", "name": s, "label": s} for s in supply_levels]
+        + [{"list_name": "demand_level", "name": d, "label": d} for d in demand_levels]
+        + [{"list_name": "quality", "name": q, "label": q} for q in quality_levels]
+        + [{"list_name": "origin_region", "name": r, "label": r} for r in origin_regions]
+    )
+    return {"survey": survey, "choices": choices,
+            "title": "AgriTogo - Prix Marché", "form_id": "agritogo_market"}
+
+
 def xlsform_to_xlsx(xlsform_dict: dict) -> bytes:
     """Convertit un dict XLSForm en fichier Excel (.xlsx) avec feuilles survey, choices, settings."""
     from openpyxl import Workbook
