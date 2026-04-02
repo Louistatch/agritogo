@@ -229,13 +229,36 @@
 
         <!-- Panel 2: KoboCollect -->
         <div id="admin-kobo" class="admin-panel">
+
+            <!-- Pipeline Status -->
+            <div class="card" style="margin-bottom:12px">
+                <div class="card-header">
+                    <span class="card-title">Enrichment API Pipeline</span>
+                    <button class="card-action" hx-get="/admin/pipeline/status" hx-target="#pipeline-status" hx-swap="innerHTML">Check Status</button>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+                    <div style="font-size:11px;padding:8px;background:var(--bg-1);border-radius:var(--radius);border:1px solid var(--border)">
+                        <div style="font-weight:600;margin-bottom:3px">Open-Meteo</div>
+                        <div style="color:var(--text-3)">Temperature, rainfall, extreme weather — free, no key</div>
+                    </div>
+                    <div style="font-size:11px;padding:8px;background:var(--bg-1);border-radius:var(--radius);border:1px solid var(--border)">
+                        <div style="font-weight:600;margin-bottom:3px">SoilGrids (ISRIC)</div>
+                        <div style="color:var(--text-3)">Soil health, pH, organic carbon — free, no key</div>
+                    </div>
+                    <div style="font-size:11px;padding:8px;background:var(--bg-1);border-radius:var(--radius);border:1px solid var(--border)">
+                        <div style="font-weight:600;margin-bottom:3px">WFP VAM</div>
+                        <div style="color:var(--text-3)">Market prices Togo — free, no key</div>
+                    </div>
+                </div>
+                <div id="pipeline-status" style="font-size:11px;color:var(--text-3)">Click "Check Status" to test API availability</div>
+            </div>
+
             <div class="grid-2">
                 <div class="card">
                     <div class="card-header">
                         <span class="card-title">KoboCollect API Connection</span>
                         {% if kobo_cfg %}<span style="font-size:10px;color:var(--green)">Connected</span>{% endif %}
-                    </div>
-                    <form hx-post="/admin/kobo/config" hx-target="#kobo-status" hx-swap="innerHTML" style="margin-bottom:10px">
+                    </div>                    <form hx-post="/admin/kobo/config" hx-target="#kobo-status" hx-swap="innerHTML" style="margin-bottom:10px">
                         <div style="display:flex;flex-direction:column;gap:6px">
                             <input type="text" name="kobo_url" placeholder="Server URL (e.g. https://kf.kobotoolbox.org)" value="{{ kobo_cfg.base_url if kobo_cfg else '' }}" style="width:100%">
                             <input type="text" name="kobo_token" placeholder="API Token" value="{{ kobo_cfg.token if kobo_cfg else '' }}" style="width:100%">

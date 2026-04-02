@@ -182,3 +182,31 @@ def admin_download_xlsform(form_type):
     return Response(xlsx_data,
                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f"attachment;filename={name}"})
+
+
+# ── Data Pipeline Routes ──
+
+@admin_bp.route("/pipeline/status")
+def pipeline_status():
+    """Check external API availability."""
+    from app.data_pipeline import get_pipeline_status
+    status = get_pipeline_status()
+    html = '<div style="display:flex;flex-direction:column;gap:4px">'
+    icons = {"ok": "●", "unreachable": "○"}
+    colors = {"ok": "var(--green)", "unreachable": "var(--red)"}
+    for api, state in status.items():
+        color = colors.get(state, "var(--amber)")
+        icon = icons.get(state, "◐")
+        html += f'<div style="display:flex;gap:8px;align-items:center;font-size:11px"><span style="color:{color}">{icon}</span><span style="color:var(--text-2)">{api.replace("_"," ").title()}</span><span style="color:{color};font-family:var(--mono)">{state}</span></div>'
+    html += '</div>'
+    return html
+
+
+@admin_bp.route("/pipeline/enrich", methods=["POST"])
+def pipeline_enrich():
+    """Enrich a KoboCollect form submission with external API data."""
+    from app.data_pipeline import enrich_kobo_submission
+    import json as _json
+    data = request.get_json(silent=True) or {}
+    enriched = enrich_kobo_submission(data)
+    return _json.dumps(enriched, ensure_ascii=False, indent=2), 200, {"Content-Type": "application/json"}
