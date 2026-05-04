@@ -45,7 +45,8 @@ def emit_thought(session_id, thought_type, content, agent=None):
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# override=False ensures Railway env vars take priority over .env file
+load_dotenv(override=False)
 
 from app.database import (
     init_db, get_produits, get_marches,
