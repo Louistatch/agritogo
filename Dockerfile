@@ -2,21 +2,21 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# libportaudio2 required by sounddevice (agentscope dependency)
+# System deps: gcc for compiled packages, libportaudio2 for sounddevice (agentscope)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libportaudio2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install app dependencies
+# Install ALL dependencies from requirements.txt
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source
+# Copy app source
 COPY . .
 
-# Install local agentscope (dev0) — overrides PyPI version
-RUN pip install --no-cache-dir -e . --no-deps
+# DO NOT run pip install -e . — pyproject.toml belongs to agentscope upstream framework
+# gunicorn finds app.server:app via WORKDIR /app
 
 ENV PORT=8080
 EXPOSE 8080

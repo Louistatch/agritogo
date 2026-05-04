@@ -12,4 +12,4 @@ anthropic
 dashscope
 openai
 google-genai
-# agentscope installed via pip install -e . (local dev version)
+agentscope==1.0.19.post1
