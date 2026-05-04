@@ -75,6 +75,11 @@ app.register_blueprint(admin_bp)
 app.register_blueprint(api_bp)
 
 
+@app.route("/health")
+def health():
+    return {"status": "ok"}, 200
+
+
 @app.route("/lang/<lang>")
 def set_lang(lang):
     if lang in ("en", "fr"):

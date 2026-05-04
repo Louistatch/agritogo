@@ -25,7 +25,7 @@ RUN pip install --no-cache-dir -e . && \
         python-dotenv
 
 # Expose port
-EXPOSE 5000
+EXPOSE 8000
 
 # Run with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app.server:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "app.server:app"]
