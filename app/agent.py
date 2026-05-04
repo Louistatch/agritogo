@@ -1,12 +1,18 @@
 """Agent IA AgriTogo - Forecasting des prix agricoles au Togo."""
 
 import os
-from agentscope.agent import ReActAgent
-from agentscope.model import GeminiChatModel, DashScopeChatModel
-from agentscope.formatter import GeminiChatFormatter, DashScopeChatFormatter
-from agentscope.memory import InMemoryMemory
-from agentscope.tool import Toolkit
-from agentscope.message import Msg
+
+# Lazy imports to avoid crash at startup if agentscope is not yet installed
+try:
+    from agentscope.agent import ReActAgent
+    from agentscope.model import GeminiChatModel, DashScopeChatModel
+    from agentscope.formatter import GeminiChatFormatter, DashScopeChatFormatter
+    from agentscope.memory import InMemoryMemory
+    from agentscope.tool import Toolkit
+    from agentscope.message import Msg
+    _AGENTSCOPE_AVAILABLE = True
+except ImportError:
+    _AGENTSCOPE_AVAILABLE = False
 
 from app.tools import (
     consulter_prix, lister_produits, lister_marches,
@@ -63,6 +69,8 @@ _agents = {}
 
 
 def _build_toolkit():
+    if not _AGENTSCOPE_AVAILABLE:
+        return None
     toolkit = Toolkit()
     for fn in [consulter_prix, lister_produits, lister_marches,
                enregistrer_prevision, analyser_tendance,
@@ -118,6 +126,8 @@ def _get_agent(model_choice="gemini"):
 
 async def ask_agent(question: str, model_choice: str = "gemini") -> str:
     """Pose une question avec rotation automatique des 3 clés Gemini."""
+    if not _AGENTSCOPE_AVAILABLE:
+        return "⚠️ AgentScope non disponible. Vérifiez l'installation des dépendances."
     from app.key_rotation import get_all_keys_count
     max_tries = get_all_keys_count()
     for attempt in range(max_tries):

@@ -4,12 +4,17 @@ import os
 import asyncio
 from datetime import datetime
 
-from agentscope.agent import ReActAgent
-from agentscope.model import GeminiChatModel, DashScopeChatModel
-from agentscope.formatter import GeminiChatFormatter, DashScopeChatFormatter
-from agentscope.memory import InMemoryMemory
-from agentscope.tool import Toolkit
-from agentscope.message import Msg
+# Lazy imports to avoid crash at startup if agentscope is not yet installed
+try:
+    from agentscope.agent import ReActAgent
+    from agentscope.model import GeminiChatModel, DashScopeChatModel
+    from agentscope.formatter import GeminiChatFormatter, DashScopeChatFormatter
+    from agentscope.memory import InMemoryMemory
+    from agentscope.tool import Toolkit
+    from agentscope.message import Msg
+    _AGENTSCOPE_AVAILABLE = True
+except ImportError:
+    _AGENTSCOPE_AVAILABLE = False
 
 from app.agents.prompts import (
     COORDINATOR_PROMPT, MARKET_INTEL_PROMPT, QUANT_FORECAST_PROMPT,
@@ -47,6 +52,8 @@ AGENT_CONFIGS = {
 
 def _build_toolkit(tool_set="all"):
     """Build toolkit based on agent specialization."""
+    if not _AGENTSCOPE_AVAILABLE:
+        return None
     toolkit = Toolkit()
     market_tools = [consulter_prix, lister_produits, lister_marches,
                     enregistrer_prevision, analyser_tendance]
@@ -78,6 +85,8 @@ def _build_toolkit(tool_set="all"):
 
 
 def _create_model(model_choice="gemini"):
+    if not _AGENTSCOPE_AVAILABLE:
+        raise RuntimeError("AgentScope not available")
     if model_choice == "qwen":
         return (
             DashScopeChatModel(

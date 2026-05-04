@@ -11,3 +11,5 @@ python-dotenv
 anthropic
 dashscope
 openai
+agentscope
+google-genai
