@@ -128,7 +128,10 @@ async def ask_agent(question: str, model_choice: str = "gemini") -> str:
     """Pose une question avec rotation automatique des 3 clés Gemini."""
     if not _AGENTSCOPE_AVAILABLE:
         return "⚠️ AgentScope non disponible. Vérifiez l'installation des dépendances."
-    from app.key_rotation import get_all_keys_count
+    from app.key_rotation import get_all_keys_count, get_gemini_key
+    # Debug: log key availability
+    key_preview = get_gemini_key()
+    print(f"[AGENT] key available: {'YES' if key_preview else 'NO'}, count: {get_all_keys_count()}")
     max_tries = get_all_keys_count()
     for attempt in range(max_tries):
         try:
@@ -144,4 +147,4 @@ async def ask_agent(question: str, model_choice: str = "gemini") -> str:
                     continue
                 return "All Gemini API keys have reached their daily quota. Please use Claude (unlimited) in the Analyst tab."
             return f"Error: {e}"
-    return "No API keys available. Use Claude (unlimited) in the Analyst tab."
+    return f"No API keys available (GEMINI_API_KEY_1/2/3 not set). Use Claude (unlimited) in the Analyst tab."

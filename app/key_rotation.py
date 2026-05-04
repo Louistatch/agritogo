@@ -7,19 +7,23 @@ _current_index = 0
 
 
 def _load_keys():
+    """Always reload from env — never cache an empty list."""
     global _gemini_keys
-    if not _gemini_keys:
-        keys = []
-        for i in range(1, 10):
-            k = os.environ.get(f"GEMINI_API_KEY_{i}")
-            if k:
-                keys.append(k)
-        # Fallback to single key
-        if not keys:
-            single = os.environ.get("GEMINI_API_KEY", "")
-            if single:
-                keys.append(single)
+    keys = []
+    for i in range(1, 10):
+        k = os.environ.get(f"GEMINI_API_KEY_{i}", "").strip()
+        if k:
+            keys.append(k)
+    # Fallback to single key
+    if not keys:
+        single = os.environ.get("GEMINI_API_KEY", "").strip()
+        if single:
+            keys.append(single)
+    # Only update if we found keys — never overwrite a working list with empty
+    if keys:
         _gemini_keys = keys
+    elif not _gemini_keys:
+        _gemini_keys = []
 
 
 def get_gemini_key() -> str:
@@ -37,10 +41,9 @@ def rotate_gemini_key() -> str:
     if not _gemini_keys:
         return ""
     _current_index = (_current_index + 1) % len(_gemini_keys)
-    new_key = _gemini_keys[_current_index]
-    return new_key
+    return _gemini_keys[_current_index]
 
 
 def get_all_keys_count() -> int:
     _load_keys()
-    return len(_gemini_keys)
+    return max(len(_gemini_keys), 1)  # Always at least 1 attempt
