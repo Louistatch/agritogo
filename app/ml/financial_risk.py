@@ -6,7 +6,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'agentscope', 'data')
+from app.ml import get_data_dir
+DATA_DIR = get_data_dir()
 REGION_MAP = {"East": "Maritime", "West": "Plateaux", "North": "Kara",
               "South": "Centrale", "Central": "Savanes"}
 FEATURES = ['Loan_Amount', 'Debt_to_Equity', 'Avg_Temperature',

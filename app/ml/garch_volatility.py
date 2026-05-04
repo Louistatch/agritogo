@@ -3,8 +3,9 @@ import os
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+from app.ml import get_data_dir
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'agentscope', 'data')
+DATA_DIR = get_data_dir()
 
 
 def _load_data(product, n=1000):
@@ -29,7 +30,7 @@ def _synthetic(product, n=1000):
     dates = [end - timedelta(days=i) for i in range(n)][::-1]
     rets = np.random.normal(0.0001, 0.015, n)
     prices = base * np.exp(np.cumsum(rets))
-    sma20 = pd.Series(prices).rolling(20).mean().fillna(method='bfill').values
+    sma20 = pd.Series(prices).rolling(20).mean().bfill().values
     rsi = np.full(n, 50.0)
     return pd.DataFrame({
         'Date': dates, 'Daily_Return_Pct': rets * 100,

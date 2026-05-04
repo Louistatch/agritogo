@@ -3,7 +3,8 @@ import os
 import numpy as np
 import pandas as pd
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'agentscope', 'data')
+from app.ml import get_data_dir
+DATA_DIR = get_data_dir()
 REGIONS = ["Maritime", "Plateaux", "Centrale", "Kara", "Savanes"]
 
 from app.ml.togo_adapter import TOGO_REGIONS, TOGO_YIELDS

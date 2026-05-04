@@ -6,7 +6,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'agentscope', 'data')
+from app.ml import get_data_dir
+DATA_DIR = get_data_dir()
 REGIONS = ["Maritime", "Plateaux", "Centrale", "Kara", "Savanes"]
 FEAT_COLS = ['farm_size', 'annual_revenue', 'input_costs', 'yield_per_ha', 'climate_risk_score']
 CLUSTER_NAMES = {

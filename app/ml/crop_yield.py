@@ -13,7 +13,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'agentscope', 'data')
+from app.ml import get_data_dir
+DATA_DIR = get_data_dir()
 REGIONS = ["Maritime", "Plateaux", "Centrale", "Kara", "Savanes"]
 CROPS_EN = ["Maize", "Rice, paddy", "Sorghum", "Soybeans", "Cassava", "Yams"]
 CROP_FR = {
