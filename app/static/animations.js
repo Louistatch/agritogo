@@ -292,33 +292,17 @@ document.addEventListener('DOMContentLoaded', function() {
         var produitVal = produit ? produit.value : 'Maïs';
         var marcheVal = marche ? marche.value : '';
 
-        // 1. Price chart immediately
+        // Price chart only — heatmap/gauge/forecast use triggerChart() buttons
         ATData.loadPriceChart('chart-price', produitVal, marcheVal);
 
-        // 2. KPI heatmap (GET — fast)
-        setTimeout(function() {
+        // KPI charts in Forecasts tab
+        if (document.getElementById('chart-roi-bubble')) {
             ATData.get('/kpi').then(function(kpi) {
                 if (!kpi) return;
-                if (document.getElementById('chart-heatmap')) Charts.regionalHeatmap('chart-heatmap', kpi);
                 if (document.getElementById('chart-roi-bubble')) Charts.roiBubble('chart-roi-bubble', kpi);
                 if (document.getElementById('chart-yield-radar')) Charts.yieldRadar('chart-yield-radar', kpi);
-            }).catch(function(e){ console.error('KPI:', e); });
-        }, 400);
-
-        // 3. Risk gauge (POST — medium)
-        setTimeout(function() {
-            ATData.post('/risk').then(function(risk) {
-                if (!risk) return;
-                if (document.getElementById('chart-gauge')) Charts.riskGauge('chart-gauge', risk);
-                if (document.getElementById('chart-risk-gauge')) Charts.riskGauge('chart-risk-gauge', risk);
-            }).catch(function(e){ console.error('Risk:', e); });
-        }, 800);
-
-        // 4. Forecast (POST GARCH — slow)
-        setTimeout(function() {
-            if (document.getElementById('chart-forecast'))
-                ATData.loadForecastChart('chart-forecast', produitVal);
-        }, 1200);
+            }).catch(function(){});
+        }
     }
 
     if (document.getElementById('tab-dashboard') &&

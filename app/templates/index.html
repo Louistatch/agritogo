@@ -82,19 +82,34 @@
                     <div id="chart-price" class="chart-container"></div>
                 </div>
                 <div class="card">
-                    <div class="card-header"><span class="card-title">30-Day Forecast</span></div>
-                    <div id="chart-forecast" class="chart-container"></div>
+                    <div class="card-header">
+                        <span class="card-title">30-Day Forecast</span>
+                        <button class="chart-trigger-btn" onclick="triggerChart('forecast')" title="Load forecast">&#9654;</button>
+                    </div>
+                    <div id="chart-forecast" class="chart-container chart-placeholder" data-chart="forecast">
+                        <span class="chart-placeholder-text">Click &#9654; to load GARCH forecast</span>
+                    </div>
                 </div>
             </div>
 
             <div class="grid-3 mb-md">
                 <div class="card">
-                    <div class="card-header"><span class="card-title">Regional Heatmap</span></div>
-                    <div id="chart-heatmap" class="chart-container"></div>
+                    <div class="card-header">
+                        <span class="card-title">Regional Heatmap</span>
+                        <button class="chart-trigger-btn" onclick="triggerChart('heatmap')" title="Load heatmap">&#9654;</button>
+                    </div>
+                    <div id="chart-heatmap" class="chart-container chart-placeholder" data-chart="heatmap">
+                        <span class="chart-placeholder-text">Click &#9654; to load regional data</span>
+                    </div>
                 </div>
                 <div class="card">
-                    <div class="card-header"><span class="card-title">Portfolio Risk</span></div>
-                    <div id="chart-gauge" style="height:180px"></div>
+                    <div class="card-header">
+                        <span class="card-title">Portfolio Risk</span>
+                        <button class="chart-trigger-btn" onclick="triggerChart('gauge')" title="Load risk gauge">&#9654;</button>
+                    </div>
+                    <div id="chart-gauge" style="height:180px" class="chart-placeholder" data-chart="gauge">
+                        <span class="chart-placeholder-text">Click &#9654; to load risk score</span>
+                    </div>
                 </div>
                 <div class="card decision-panel">
                     <div class="card-header">
@@ -354,6 +369,55 @@
 
     <script>
         function engineAsk(m){var i=document.querySelector('#tab-analyst input[name="question"]');if(i){i.value=m;i.closest('form').querySelector('button[type="submit"]').click()}}
+
+        // ── Chart trigger system ──────────────────────────
+        var _chartLoaded = {};
+
+        function triggerChart(name) {
+            if (_chartLoaded[name]) return; // already loaded
+            _chartLoaded[name] = true;
+
+            var btn = document.querySelector('[onclick="triggerChart(\''+name+'\')"]');
+            if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+
+            var produit = document.getElementById('dash-produit');
+            var produitVal = produit ? produit.value : 'Ma\u00EFs';
+
+            if (name === 'forecast') {
+                ATData.loadForecastChart('chart-forecast', produitVal).then(function() {
+                    if (btn) { btn.textContent = '↺'; btn.disabled = false; btn.onclick = function(){ _chartLoaded['forecast']=false; triggerChart('forecast'); }; }
+                }).catch(function(e) {
+                    console.error('Forecast error:', e);
+                    if (btn) { btn.textContent = '!'; btn.disabled = false; _chartLoaded['forecast']=false; }
+                });
+            } else if (name === 'heatmap') {
+                ATData.get('/kpi').then(function(kpi) {
+                    if (kpi) Charts.regionalHeatmap('chart-heatmap', kpi);
+                    if (btn) { btn.textContent = '↺'; btn.disabled = false; btn.onclick = function(){ _chartLoaded['heatmap']=false; triggerChart('heatmap'); }; }
+                }).catch(function(e) {
+                    console.error('Heatmap error:', e);
+                    if (btn) { btn.textContent = '!'; btn.disabled = false; _chartLoaded['heatmap']=false; }
+                });
+            } else if (name === 'gauge') {
+                ATData.post('/risk').then(function(risk) {
+                    if (risk) Charts.riskGauge('chart-gauge', risk);
+                    if (btn) { btn.textContent = '↺'; btn.disabled = false; btn.onclick = function(){ _chartLoaded['gauge']=false; triggerChart('gauge'); }; }
+                }).catch(function(e) {
+                    console.error('Gauge error:', e);
+                    if (btn) { btn.textContent = '!'; btn.disabled = false; _chartLoaded['gauge']=false; }
+                });
+            }
+        }
+
+        // Auto-trigger all 3 on dashboard load (with stagger)
+        document.addEventListener('DOMContentLoaded', function() {
+            if (document.getElementById('tab-dashboard') &&
+                document.getElementById('tab-dashboard').classList.contains('active')) {
+                setTimeout(function(){ triggerChart('heatmap'); }, 600);
+                setTimeout(function(){ triggerChart('gauge'); }, 1000);
+                setTimeout(function(){ triggerChart('forecast'); }, 1500);
+            }
+        });
     </script>
     <input type="hidden" id="puter-system-prompt" value="Tu es AgriTogo, Decision Intelligence Engine pour l'agriculture au Togo. Expertise: agronomie, data science, 8+ ans terrain au Togo. Marches: Lome-Adawlato, Kara, Sokode, Atakpame, Dapaong. Cultures: Mais, Riz, Sorgho, Mil, Igname, Manioc, Soja, Arachide. Reponds en {{ 'anglais' if lang=='en' else 'francais' }} uniquement. Format: Analyse > Recommandations > Risques > Prochaines etapes. Termine par: Comment puis-je vous aider davantage sur vos defis agricoles?">
 

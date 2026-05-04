@@ -1,0 +1,13 @@
+flask
+gunicorn
+scikit-learn
+xgboost
+arch
+pandas
+plotly
+openpyxl
+requests
+python-dotenv
+anthropic
+dashscope
+openai
