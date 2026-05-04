@@ -42,6 +42,8 @@ dependencies = [
     "sqlalchemy",
     "python-frontmatter",
     "aiofiles",
+    "flask",
+    "gunicorn",
 ]
 
 [project.optional-dependencies]
