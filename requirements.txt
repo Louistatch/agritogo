@@ -11,5 +11,5 @@ python-dotenv
 anthropic
 dashscope
 openai
-agentscope
 google-genai
+# agentscope installed via pip install -e . (local dev version)
