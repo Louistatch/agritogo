@@ -17,6 +17,9 @@ COPY . .
 # Install agentscope in editable mode
 RUN pip install --no-cache-dir -e .
 
+# Railway injects PORT at runtime — default to 8080 if not set
+ENV PORT=8080
 EXPOSE 8080
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "120", "app.server:app"]
+# Use shell form so $PORT is expanded by the shell at runtime
+CMD gunicorn --bind "0.0.0.0:${PORT}" --workers 2 --timeout 120 --log-level info app.server:app

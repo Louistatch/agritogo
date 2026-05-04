@@ -52,16 +52,23 @@ from app.database import (
     get_prix_historiques, save_conversation, get_conversations,
     get_latest_prices, clear_conversations,
 )
-from app.agent import ask_agent
 from app.i18n import get_translations, get_lang_instruction
-from app.ml.crop_yield import run_crop_yield_prediction
-from app.ml.garch_volatility import run_garch_forecast
-from app.ml.financial_risk import run_risk_assessment
-from app.ml.farmer_segmentation import run_farmer_segmentation
-from app.ml.kpi_dashboard import get_kpi_data
 from app.admin import admin_bp
 from app.api import api_bp
-from app.agents.engine import process_query, get_memory, add_feedback
+
+# Heavy imports — wrapped to avoid crashing workers at startup
+try:
+    from app.agent import ask_agent
+    from app.agents.engine import process_query, get_memory, add_feedback
+    from app.ml.crop_yield import run_crop_yield_prediction
+    from app.ml.garch_volatility import run_garch_forecast
+    from app.ml.financial_risk import run_risk_assessment
+    from app.ml.farmer_segmentation import run_farmer_segmentation
+    from app.ml.kpi_dashboard import get_kpi_data
+    _ML_AVAILABLE = True
+except Exception as e:
+    print(f"[WARN] ML/Agent imports failed: {e}")
+    _ML_AVAILABLE = False
 
 app = Flask(
     __name__,
@@ -69,10 +76,15 @@ app = Flask(
     static_folder=os.path.join(os.path.dirname(__file__), "static"),
 )
 
-init_db()
-app.secret_key = "agritogo-secret-key-2026"
+app.secret_key = os.environ.get("SECRET_KEY", "agritogo-secret-key-2026")
 app.register_blueprint(admin_bp)
 app.register_blueprint(api_bp)
+
+# Init DB after app creation (non-blocking)
+try:
+    init_db()
+except Exception as e:
+    print(f"[WARN] DB init failed: {e}")
 
 
 @app.route("/health")
@@ -146,6 +158,8 @@ def chat_clear():
 
 @app.route("/chat", methods=["POST"])
 def chat():
+    if not _ML_AVAILABLE:
+        return "<div class='msg msg-agent'><p>⚠️ Agent non disponible au démarrage.</p></div>"
     message = request.form.get("message", "").strip()
     model_choice = request.form.get("model", "gemini")
     if not message:
@@ -295,6 +309,8 @@ def ml_kpi():
 
 @app.route("/engine", methods=["POST"])
 def engine_query():
+    if not _ML_AVAILABLE:
+        return "<div class='msg'>⚠️ Engine non disponible.</div>"
     question = request.form.get("question", "").strip()
     audience = request.form.get("audience", "farmer")
     if not question:
