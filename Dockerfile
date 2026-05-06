@@ -14,8 +14,16 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
-RUN chmod +x start.sh
-
 EXPOSE 8080
 
-CMD ["bash", "start.sh"]
+# NO --preload: app uses background thread for ML loading
+# Flask app + /health respond in <1s, ML loads in background (~30s)
+CMD ["gunicorn", \
+     "--bind", "0.0.0.0:8080", \
+     "--workers", "1", \
+     "--worker-class", "sync", \
+     "--timeout", "120", \
+     "--log-level", "info", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "app.server:app"]
