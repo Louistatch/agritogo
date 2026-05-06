@@ -16,7 +16,9 @@ from app.kobo import (
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin", template_folder="templates")
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'agentscope', 'data')
+# Use same robust path resolution as ML modules
+from app.ml import get_data_dir
+DATA_DIR = get_data_dir()
 
 
 @admin_bp.route("/")
