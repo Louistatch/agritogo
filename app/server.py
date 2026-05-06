@@ -40,6 +40,7 @@ def debug_env():
 # ── Lazy ML state — loaded in background after startup ───────
 _ML_AVAILABLE = False
 _STARTUP_DONE = False
+_ML_LOADING = False
 _ml_lock = threading.Lock()
 
 # Module-level references — populated after background load
@@ -56,12 +57,14 @@ get_kpi_data = None
 
 def _load_ml_modules():
     """Load all heavy ML/AI modules in a background thread."""
-    global _ML_AVAILABLE, _STARTUP_DONE
+    global _ML_AVAILABLE, _STARTUP_DONE, _ML_LOADING
     global ask_agent, process_query, get_memory, add_feedback
     global run_crop_yield_prediction, run_garch_forecast
     global run_risk_assessment, run_farmer_segmentation, get_kpi_data
 
     with _ml_lock:
+        if _STARTUP_DONE:
+            return
         try:
             print("[STARTUP] Loading ML modules...")
             t0 = time.time()
@@ -95,11 +98,16 @@ def _load_ml_modules():
             _ML_AVAILABLE = False
         finally:
             _STARTUP_DONE = True
+            _ML_LOADING = False
 
 
-# Start background loading immediately — non-blocking
-_bg_thread = threading.Thread(target=_load_ml_modules, daemon=True)
-_bg_thread.start()
+def _trigger_ml_load():
+    """Trigger ML loading in background — called once on first request."""
+    global _ML_LOADING
+    if not _STARTUP_DONE and not _ML_LOADING:
+        _ML_LOADING = True
+        t = threading.Thread(target=_load_ml_modules, daemon=True)
+        t.start()
 
 # ── Persistent event loop for async agent calls ───────────────
 _loop = asyncio.new_event_loop()
@@ -153,6 +161,12 @@ try:
     init_db()
 except Exception as e:
     print(f"[WARN] DB init failed: {e}")
+
+
+@app.before_request
+def trigger_ml_on_first_request():
+    """Trigger ML loading on first real request — not during import."""
+    _trigger_ml_load()
 
 
 @app.route("/lang/<lang>")
