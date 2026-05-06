@@ -16,14 +16,5 @@ COPY . .
 
 EXPOSE 8080
 
-# NO --preload: app uses background thread for ML loading
-# Flask app + /health respond in <1s, ML loads in background (~30s)
-CMD ["gunicorn", \
-     "--bind", "0.0.0.0:8080", \
-     "--workers", "1", \
-     "--worker-class", "sync", \
-     "--timeout", "120", \
-     "--log-level", "info", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "app.server:app"]
+# Use shell form so ${PORT:-8080} is expanded at runtime
+CMD gunicorn --bind "0.0.0.0:${PORT:-8080}" --workers 1 --worker-class sync --timeout 120 --log-level info --access-logfile - --error-logfile - app.server:app
