@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
+RUN chmod +x start.sh
+
 EXPOSE 8080
 
-# Use shell form so ${PORT:-8080} is expanded at runtime
-CMD gunicorn --bind "0.0.0.0:${PORT:-8080}" --workers 1 --worker-class sync --timeout 120 --log-level info --access-logfile - --error-logfile - app.server:app
+CMD ["bash", "start.sh"]

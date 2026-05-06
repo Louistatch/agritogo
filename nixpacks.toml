@@ -1,2 +1,2 @@
 [start]
-cmd = "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --worker-class sync --timeout 120 --log-level info app.server:app"
+cmd = "bash start.sh"
