@@ -2,7 +2,6 @@
 
 import os
 
-# Lazy imports to avoid crash at startup if agentscope is not yet installed
 try:
     from agentscope.agent import ReActAgent
     from agentscope.model import GeminiChatModel, DashScopeChatModel
@@ -27,7 +26,7 @@ from app.kobo_tools import (
     consulter_donnees_terrain, analyser_collecte_terrain,
     generer_formulaire_prix, generer_formulaire_agriculteur,
 )
-from app.key_rotation import get_gemini_key, rotate_gemini_key
+from app.key_rotation import get_gemini_key, rotate_gemini_key, has_keys
 
 SYS_PROMPT = """Tu es AgriTogo, le Decision Intelligence Engine v2.0 pour l'agriculture resiliente au Togo et en Afrique de l'Ouest.
 
@@ -65,8 +64,6 @@ Donnees utilisees: [outils utilises ou donnees requises]
 Termine chaque reponse par: "Comment puis-je vous aider davantage sur vos defis agricoles?"
 """
 
-_agents = {}
-
 
 def _build_toolkit():
     if not _AGENTSCOPE_AVAILABLE:
@@ -83,14 +80,16 @@ def _build_toolkit():
     return toolkit
 
 
-def _create_gemini_agent(api_key):
-    """Create a Gemini agent with a specific key."""
+def _create_fresh_gemini_agent() -> "ReActAgent":
+    """Always create a new agent with the current key — never use cache."""
+    key = get_gemini_key()
+    print(f"[AGENT] Creating Gemini agent, key={'SET' if key else 'EMPTY'}")
     return ReActAgent(
         name="AgriTogo",
         sys_prompt=SYS_PROMPT,
         model=GeminiChatModel(
             model_name="gemini-2.5-flash",
-            api_key=api_key,
+            api_key=key,
             stream=False,
         ),
         formatter=GeminiChatFormatter(),
@@ -99,52 +98,40 @@ def _create_gemini_agent(api_key):
     )
 
 
-def _get_agent(model_choice="gemini"):
-    global _agents
-    if model_choice == "qwen":
-        if "qwen" not in _agents:
-            _agents["qwen"] = ReActAgent(
-                name="AgriTogo",
-                sys_prompt=SYS_PROMPT,
-                model=DashScopeChatModel(
-                    model_name="qwen-max",
-                    api_key=os.environ.get("DASHSCOPE_API_KEY", ""),
-                    stream=False,
-                ),
-                formatter=DashScopeChatFormatter(),
-                memory=InMemoryMemory(),
-                toolkit=_build_toolkit(),
-            )
-        return _agents["qwen"]
-    else:
-        key = get_gemini_key()
-        cache_key = f"gemini_{key[-6:]}"
-        if cache_key not in _agents:
-            _agents[cache_key] = _create_gemini_agent(key)
-        return _agents[cache_key]
-
-
 async def ask_agent(question: str, model_choice: str = "gemini") -> str:
-    """Pose une question avec rotation automatique des 3 clés Gemini."""
+    """Ask the agent — always uses fresh key from env."""
     if not _AGENTSCOPE_AVAILABLE:
         return "⚠️ AgentScope non disponible. Vérifiez l'installation des dépendances."
-    from app.key_rotation import get_all_keys_count, get_gemini_key
-    # Debug: log key availability
-    key_preview = get_gemini_key()
-    print(f"[AGENT] key available: {'YES' if key_preview else 'NO'}, count: {get_all_keys_count()}")
+
+    # Log env state for Railway debugging
+    key = get_gemini_key()
+    print(f"[AGENT] ask_agent called | key={'SET('+key[:8]+')' if key else 'EMPTY'} | has_keys={has_keys()}")
+
+    if not has_keys():
+        return (
+            "⚠️ Clés Gemini non configurées. "
+            "Ajoutez GEMINI_API_KEY_1 dans les variables Railway. "
+            "Utilisez Claude (illimité) dans l'onglet Analyste."
+        )
+
+    from app.key_rotation import get_all_keys_count
     max_tries = get_all_keys_count()
+
     for attempt in range(max_tries):
         try:
-            agent = _get_agent("gemini")
+            # Always create fresh agent with current key — no stale cache
+            agent = _create_fresh_gemini_agent()
             msg = Msg(name="user", role="user", content=question)
             response = await agent(msg)
             return response.get_text_content()
         except Exception as e:
             err = str(e).lower()
+            print(f"[AGENT] attempt {attempt+1} failed: {err[:100]}")
             if "429" in err or "quota" in err or "resource_exhausted" in err:
                 rotate_gemini_key()
                 if attempt < max_tries - 1:
                     continue
-                return "All Gemini API keys have reached their daily quota. Please use Claude (unlimited) in the Analyst tab."
-            return f"Error: {e}"
-    return f"No API keys available (GEMINI_API_KEY_1/2/3 not set). Use Claude (unlimited) in the Analyst tab."
+                return "Toutes les clés Gemini ont atteint leur quota. Utilisez Claude (illimité) dans l'onglet Analyste."
+            return f"Erreur agent: {e}"
+
+    return "Aucune clé disponible. Utilisez Claude (illimité) dans l'onglet Analyste."

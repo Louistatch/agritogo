@@ -93,6 +93,22 @@ def health():
     return {"status": "ok"}, 200
 
 
+@app.route("/debug/env")
+def debug_env():
+    """Check env vars availability — values masked for security."""
+    from app.key_rotation import _get_keys, has_keys
+    keys = _get_keys()
+    return {
+        "gemini_keys_count": len(keys),
+        "gemini_keys_set": has_keys(),
+        "GEMINI_API_KEY_1": "SET" if os.environ.get("GEMINI_API_KEY_1") else "MISSING",
+        "GEMINI_API_KEY_2": "SET" if os.environ.get("GEMINI_API_KEY_2") else "MISSING",
+        "GEMINI_API_KEY_3": "SET" if os.environ.get("GEMINI_API_KEY_3") else "MISSING",
+        "DASHSCOPE_API_KEY": "SET" if os.environ.get("DASHSCOPE_API_KEY") else "MISSING",
+        "ml_available": _ML_AVAILABLE,
+    }, 200
+
+
 @app.route("/lang/<lang>")
 def set_lang(lang):
     if lang in ("en", "fr"):
