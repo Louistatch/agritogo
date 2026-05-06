@@ -8,20 +8,113 @@ import json
 import time
 from flask import Flask, render_template, request, session, Response, stream_with_context
 
-# Persistent event loop for async agent calls
+from dotenv import load_dotenv
+load_dotenv(override=False)
+
+# ── Flask app — created IMMEDIATELY, before any heavy import ──
+app = Flask(
+    __name__,
+    template_folder=os.path.join(os.path.dirname(__file__), "templates"),
+    static_folder=os.path.join(os.path.dirname(__file__), "static"),
+)
+app.secret_key = os.environ.get("SECRET_KEY", "agritogo-secret-key-2026")
+
+# ── Health check — registered FIRST, responds in <1ms ────────
+@app.route("/health")
+def health():
+    return {"status": "ok"}, 200
+
+@app.route("/debug/env")
+def debug_env():
+    from app.key_rotation import has_keys, _get_keys
+    return {
+        "gemini_keys_count": len(_get_keys()),
+        "gemini_keys_set": has_keys(),
+        "GEMINI_API_KEY_1": "SET" if os.environ.get("GEMINI_API_KEY_1") else "MISSING",
+        "GEMINI_API_KEY_2": "SET" if os.environ.get("GEMINI_API_KEY_2") else "MISSING",
+        "GEMINI_API_KEY_3": "SET" if os.environ.get("GEMINI_API_KEY_3") else "MISSING",
+        "ml_available": _ML_AVAILABLE,
+        "startup_done": _STARTUP_DONE,
+    }, 200
+
+# ── Lazy ML state — loaded in background after startup ───────
+_ML_AVAILABLE = False
+_STARTUP_DONE = False
+_ml_lock = threading.Lock()
+
+# Module-level references — populated after background load
+ask_agent = None
+process_query = None
+get_memory = None
+add_feedback = None
+run_crop_yield_prediction = None
+run_garch_forecast = None
+run_risk_assessment = None
+run_farmer_segmentation = None
+get_kpi_data = None
+
+
+def _load_ml_modules():
+    """Load all heavy ML/AI modules in a background thread."""
+    global _ML_AVAILABLE, _STARTUP_DONE
+    global ask_agent, process_query, get_memory, add_feedback
+    global run_crop_yield_prediction, run_garch_forecast
+    global run_risk_assessment, run_farmer_segmentation, get_kpi_data
+
+    with _ml_lock:
+        try:
+            print("[STARTUP] Loading ML modules...")
+            t0 = time.time()
+
+            from app.agent import ask_agent as _ask
+            from app.agents.engine import (
+                process_query as _pq,
+                get_memory as _gm,
+                add_feedback as _af,
+            )
+            from app.ml.crop_yield import run_crop_yield_prediction as _cy
+            from app.ml.garch_volatility import run_garch_forecast as _gf
+            from app.ml.financial_risk import run_risk_assessment as _ra
+            from app.ml.farmer_segmentation import run_farmer_segmentation as _fs
+            from app.ml.kpi_dashboard import get_kpi_data as _kd
+
+            ask_agent = _ask
+            process_query = _pq
+            get_memory = _gm
+            add_feedback = _af
+            run_crop_yield_prediction = _cy
+            run_garch_forecast = _gf
+            run_risk_assessment = _ra
+            run_farmer_segmentation = _fs
+            get_kpi_data = _kd
+
+            _ML_AVAILABLE = True
+            print(f"[STARTUP] ML modules loaded in {time.time()-t0:.1f}s")
+        except Exception as e:
+            print(f"[STARTUP] ML load failed: {e}")
+            _ML_AVAILABLE = False
+        finally:
+            _STARTUP_DONE = True
+
+
+# Start background loading immediately — non-blocking
+_bg_thread = threading.Thread(target=_load_ml_modules, daemon=True)
+_bg_thread.start()
+
+# ── Persistent event loop for async agent calls ───────────────
 _loop = asyncio.new_event_loop()
-_thread = threading.Thread(target=_loop.run_forever, daemon=True)
-_thread.start()
+_loop_thread = threading.Thread(target=_loop.run_forever, daemon=True)
+_loop_thread.start()
+
 
 def run_async(coro):
-    """Run async coroutine on the persistent event loop."""
     import concurrent.futures
     future = asyncio.run_coroutine_threadsafe(coro, _loop)
     return future.result(timeout=120)
 
 
-# ── Thought Stream (SSE) ──────────────────────────────────
-_thought_queues = {}  # session_id → queue
+# ── Thought Stream (SSE) ──────────────────────────────────────
+_thought_queues = {}
 
 
 def get_thought_queue(session_id):
@@ -31,11 +124,10 @@ def get_thought_queue(session_id):
 
 
 def emit_thought(session_id, thought_type, content, agent=None):
-    """Push a thought event to the SSE stream."""
     q = get_thought_queue(session_id)
     try:
         q.put_nowait({
-            "type": thought_type,  # "thinking" | "tool_call" | "tool_result" | "decision" | "done"
+            "type": thought_type,
             "content": content,
             "agent": agent or "AgriTogo",
             "ts": time.time(),
@@ -43,11 +135,8 @@ def emit_thought(session_id, thought_type, content, agent=None):
     except queue.Full:
         pass
 
-from dotenv import load_dotenv
 
-# override=False ensures Railway env vars take priority over .env file
-load_dotenv(override=False)
-
+# ── Database + Blueprints — lightweight, load immediately ─────
 from app.database import (
     init_db, get_produits, get_marches,
     get_prix_historiques, save_conversation, get_conversations,
@@ -57,56 +146,13 @@ from app.i18n import get_translations, get_lang_instruction
 from app.admin import admin_bp
 from app.api import api_bp
 
-# Heavy imports — wrapped to avoid crashing workers at startup
-try:
-    from app.agent import ask_agent
-    from app.agents.engine import process_query, get_memory, add_feedback
-    from app.ml.crop_yield import run_crop_yield_prediction
-    from app.ml.garch_volatility import run_garch_forecast
-    from app.ml.financial_risk import run_risk_assessment
-    from app.ml.farmer_segmentation import run_farmer_segmentation
-    from app.ml.kpi_dashboard import get_kpi_data
-    _ML_AVAILABLE = True
-except Exception as e:
-    print(f"[WARN] ML/Agent imports failed: {e}")
-    _ML_AVAILABLE = False
-
-app = Flask(
-    __name__,
-    template_folder=os.path.join(os.path.dirname(__file__), "templates"),
-    static_folder=os.path.join(os.path.dirname(__file__), "static"),
-)
-
-app.secret_key = os.environ.get("SECRET_KEY", "agritogo-secret-key-2026")
 app.register_blueprint(admin_bp)
 app.register_blueprint(api_bp)
 
-# Init DB after app creation (non-blocking)
 try:
     init_db()
 except Exception as e:
     print(f"[WARN] DB init failed: {e}")
-
-
-@app.route("/health")
-def health():
-    return {"status": "ok"}, 200
-
-
-@app.route("/debug/env")
-def debug_env():
-    """Check env vars availability — values masked for security."""
-    from app.key_rotation import _get_keys, has_keys
-    keys = _get_keys()
-    return {
-        "gemini_keys_count": len(keys),
-        "gemini_keys_set": has_keys(),
-        "GEMINI_API_KEY_1": "SET" if os.environ.get("GEMINI_API_KEY_1") else "MISSING",
-        "GEMINI_API_KEY_2": "SET" if os.environ.get("GEMINI_API_KEY_2") else "MISSING",
-        "GEMINI_API_KEY_3": "SET" if os.environ.get("GEMINI_API_KEY_3") else "MISSING",
-        "DASHSCOPE_API_KEY": "SET" if os.environ.get("DASHSCOPE_API_KEY") else "MISSING",
-        "ml_available": _ML_AVAILABLE,
-    }, 200
 
 
 @app.route("/lang/<lang>")
@@ -175,8 +221,8 @@ def chat_clear():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    if not _ML_AVAILABLE:
-        return "<div class='msg msg-agent'><p>⚠️ Agent non disponible au démarrage.</p></div>"
+    if not _ML_AVAILABLE or ask_agent is None:
+        return "<div class='msg msg-agent'><p>⚠️ Agent en cours de chargement, réessayez dans 30 secondes.</p></div>"
     message = request.form.get("message", "").strip()
     model_choice = request.form.get("model", "gemini")
     if not message:
@@ -326,8 +372,8 @@ def ml_kpi():
 
 @app.route("/engine", methods=["POST"])
 def engine_query():
-    if not _ML_AVAILABLE:
-        return "<div class='msg'>⚠️ Engine non disponible.</div>"
+    if not _ML_AVAILABLE or process_query is None:
+        return "<div class='msg'>⚠️ Engine en cours de chargement, réessayez dans 30 secondes.</div>"
     question = request.form.get("question", "").strip()
     audience = request.form.get("audience", "farmer")
     if not question:
