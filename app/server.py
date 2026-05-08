@@ -102,7 +102,7 @@ def _load_ml_modules():
 
 
 def _trigger_ml_load():
-    """Trigger ML loading in background — called once on first request."""
+    """Trigger ML loading in background — called once on first ML request."""
     global _ML_LOADING
     if not _STARTUP_DONE and not _ML_LOADING:
         _ML_LOADING = True
@@ -110,14 +110,29 @@ def _trigger_ml_load():
         t.start()
 
 # ── Persistent event loop for async agent calls ───────────────
-_loop = asyncio.new_event_loop()
-_loop_thread = threading.Thread(target=_loop.run_forever, daemon=True)
-_loop_thread.start()
+# Created lazily on first use — not at module import
+_loop = None
+_loop_thread = None
+_loop_lock = threading.Lock()
+
+
+def _get_loop():
+    global _loop, _loop_thread
+    if _loop is None:
+        with _loop_lock:
+            if _loop is None:
+                _loop = asyncio.new_event_loop()
+                _loop_thread = threading.Thread(
+                    target=_loop.run_forever, daemon=True
+                )
+                _loop_thread.start()
+    return _loop
 
 
 def run_async(coro):
     import concurrent.futures
-    future = asyncio.run_coroutine_threadsafe(coro, _loop)
+    loop = _get_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
     return future.result(timeout=120)
 
 
@@ -161,12 +176,6 @@ try:
     init_db()
 except Exception as e:
     print(f"[WARN] DB init failed: {e}")
-
-
-@app.before_request
-def trigger_ml_on_first_request():
-    """Trigger ML loading on first real request — not during import."""
-    _trigger_ml_load()
 
 
 @app.route("/lang/<lang>")
@@ -235,6 +244,7 @@ def chat_clear():
 
 @app.route("/chat", methods=["POST"])
 def chat():
+    _trigger_ml_load()
     if not _ML_AVAILABLE or ask_agent is None:
         return "<div class='msg msg-agent'><p>⚠️ Agent en cours de chargement, réessayez dans 30 secondes.</p></div>"
     message = request.form.get("message", "").strip()
@@ -386,6 +396,7 @@ def ml_kpi():
 
 @app.route("/engine", methods=["POST"])
 def engine_query():
+    _trigger_ml_load()
     if not _ML_AVAILABLE or process_query is None:
         return "<div class='msg'>⚠️ Engine en cours de chargement, réessayez dans 30 secondes.</div>"
     question = request.form.get("question", "").strip()
