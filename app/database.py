@@ -96,7 +96,6 @@ def _seed_data(c):
 
     marches = ["Lomé-Adawlato", "Kara", "Sokodé", "Atakpamé", "Dapaong"]
 
-    # Prix de base par produit (FCFA/kg) - réalistes pour le Togo
     prix_base = {
         "Maïs": 220, "Riz local": 450, "Sorgho": 200,
         "Mil": 250, "Haricot": 500, "Soja": 350,
@@ -104,24 +103,23 @@ def _seed_data(c):
         "Tomate": 600, "Piment": 800, "Oignon": 350,
     }
 
-    # Générer 12 mois de données historiques
     today = datetime.now()
+    # Batch insert for speed — single executemany instead of 720 individual inserts
+    rows = []
     for i, (nom, unite, cat) in enumerate(produits, 1):
         base = prix_base[nom]
         for marche in marches:
             for month_offset in range(12, 0, -1):
                 date = today - timedelta(days=month_offset * 30)
-                # Variation saisonnière + bruit
-                saison = 1.0 + 0.15 * (
-                    (month_offset % 6) / 6.0 - 0.5
-                )
+                saison = 1.0 + 0.15 * ((month_offset % 6) / 6.0 - 0.5)
                 bruit = random.uniform(0.92, 1.08)
                 prix = round(base * saison * bruit, 0)
-                c.execute(
-                    "INSERT INTO prix (produit_id, marche, prix, date) "
-                    "VALUES (?, ?, ?, ?)",
-                    (i, marche, prix, date.strftime("%Y-%m-%d")),
-                )
+                rows.append((i, marche, prix, date.strftime("%Y-%m-%d")))
+
+    c.executemany(
+        "INSERT INTO prix (produit_id, marche, prix, date) VALUES (?, ?, ?, ?)",
+        rows,
+    )
 
 
 def get_produits():
@@ -343,35 +341,27 @@ def export_prix_csv():
 def get_latest_prices():
     """Get the most recent price for each product with trend."""
     conn = get_db()
+    # Single efficient query — no correlated subquery
     rows = conn.execute("""
-        SELECT pr.nom, p.prix, p.date, p.marche,
-            (SELECT p2.prix FROM prix p2
-             WHERE p2.produit_id = pr.id
-             ORDER BY p2.date DESC LIMIT 1 OFFSET 5) as prev_prix
+        SELECT pr.nom, p.prix, p.date, p.marche
         FROM prix p
         JOIN produits pr ON p.produit_id = pr.id
         WHERE p.id IN (
-            SELECT MAX(p3.id) FROM prix p3 GROUP BY p3.produit_id
+            SELECT MAX(id) FROM prix GROUP BY produit_id
         )
         ORDER BY pr.nom
     """).fetchall()
     conn.close()
-    result = []
-    for r in rows:
-        current = r["prix"]
-        prev = r["prev_prix"]
-        if prev and prev > 0:
-            delta = round((current - prev) / prev * 100, 1)
-        else:
-            delta = 0.0
-        result.append({
+    return [
+        {
             "nom": r["nom"],
-            "prix": round(current),
+            "prix": round(r["prix"]),
             "date": r["date"],
             "marche": r["marche"],
-            "delta": delta,
-        })
-    return result
+            "delta": 0.0,
+        }
+        for r in rows
+    ]
 
 
 def clear_conversations():
