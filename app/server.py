@@ -223,17 +223,22 @@ def inject_i18n():
 
 @app.route("/")
 def index():
-    produits = get_produits()
-    marches = get_marches()
-    conversations = get_conversations()
-    latest_prices = get_latest_prices()
-    return render_template(
-        "index.html",
-        produits=produits,
-        marches=marches,
-        conversations=conversations,
-        prices=latest_prices,
-    )
+    try:
+        produits = get_produits()
+        marches = get_marches()
+        conversations = get_conversations()
+        latest_prices = get_latest_prices()
+        return render_template(
+            "index.html",
+            produits=produits,
+            marches=marches,
+            conversations=conversations,
+            prices=latest_prices,
+        )
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] / route failed: {traceback.format_exc()}")
+        return f"<pre>Error: {e}\n\n{traceback.format_exc()}</pre>", 500
 
 
 @app.route("/chat/clear", methods=["DELETE"])
