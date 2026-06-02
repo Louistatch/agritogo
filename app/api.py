@@ -148,7 +148,7 @@ def agent_chat():
             latest = get_latest_prices()
             if latest:
                 price_ctx = "; ".join(
-                    f"{p['produit']}={p['prix']}FCFA à {p['marche']}"
+                    f"{p['nom']}={p['prix']}FCFA à {p['marche']}"
                     for p in latest[:8]
                 )
                 enriched = (
