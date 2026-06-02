@@ -197,20 +197,33 @@ def set_lang(lang):
 
 @app.route("/thoughts")
 def thoughts_stream():
-    """SSE endpoint — streams agent reasoning steps to the frontend."""
+    """SSE endpoint — streams agent reasoning steps to the frontend.
+
+    Fixed: returns immediately what's in the queue instead of blocking the
+    gunicorn sync worker for 30s (which caused WORKER TIMEOUT crashes).
+    """
     sid = session.get("_id", "default")
     q = get_thought_queue(sid)
 
+    # Drain everything currently in the queue, don't block
+    events = []
+    while not q.empty():
+        try:
+            events.append(q.get_nowait())
+        except queue.Empty:
+            break
+
+    if not events:
+        return Response(
+            "data: {\"type\":\"ping\"}\n\n",
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     def generate():
         yield "data: {\"type\":\"connected\"}\n\n"
-        while True:
-            try:
-                event = q.get(timeout=30)
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                if event.get("type") == "done":
-                    break
-            except queue.Empty:
-                yield "data: {\"type\":\"ping\"}\n\n"
+        for event in events:
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return Response(
         stream_with_context(generate()),
