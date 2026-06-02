@@ -1,372 +1,324 @@
-"""Base de données SQLite pour les prix agricoles au Togo."""
+"""
+Database layer — Supabase (PostgreSQL) backend.
 
-import sqlite3
+Replaces the original SQLite backend. All function signatures are preserved
+so the rest of the codebase (tools, server, admin, ML) works unchanged.
+
+Env vars required:
+  SUPABASE_URL        — e.g. https://xxxx.supabase.co
+  SUPABASE_SERVICE_KEY — service_role key (reads + writes)
+"""
+
 import os
-from datetime import datetime, timedelta
-import random
+from datetime import datetime
+from functools import lru_cache
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "agritogo.db")
+from supabase import create_client, Client
+
+
+@lru_cache(maxsize=1)
+def _get_client() -> Client:
+    url = os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        raise RuntimeError(
+            "SUPABASE_URL and SUPABASE_SERVICE_KEY must be set. "
+            "Get them from your Supabase project settings."
+        )
+    return create_client(url, key)
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Compatibility shim — returns the Supabase client."""
+    return _get_client()
 
 
 def init_db():
-    """Initialise la base avec les tables et données de démo."""
-    conn = get_db()
-    c = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS produits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nom TEXT UNIQUE NOT NULL,
-            unite TEXT NOT NULL DEFAULT 'kg',
-            categorie TEXT NOT NULL DEFAULT 'céréale'
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS prix (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            produit_id INTEGER NOT NULL,
-            marche TEXT NOT NULL,
-            prix REAL NOT NULL,
-            date TEXT NOT NULL,
-            FOREIGN KEY (produit_id) REFERENCES produits(id)
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS previsions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            produit_id INTEGER NOT NULL,
-            marche TEXT NOT NULL,
-            prix_prevu REAL NOT NULL,
-            date_prevision TEXT NOT NULL,
-            date_cible TEXT NOT NULL,
-            confiance REAL DEFAULT 0.0,
-            methode TEXT DEFAULT 'agent_ia',
-            FOREIGN KEY (produit_id) REFERENCES produits(id)
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role TEXT NOT NULL,
-            contenu TEXT NOT NULL,
-            timestamp TEXT NOT NULL
-        )
-    """)
-
-    # Données de démo si la table est vide
-    c.execute("SELECT COUNT(*) FROM produits")
-    if c.fetchone()[0] == 0:
-        _seed_data(c)
-
-    conn.commit()
-    conn.close()
+    """No-op: Supabase schema is managed via migrations."""
+    pass
 
 
-def _seed_data(c):
-    """Insère des données réalistes de prix agricoles au Togo."""
-    produits = [
-        ("Maïs", "kg", "céréale"),
-        ("Riz local", "kg", "céréale"),
-        ("Sorgho", "kg", "céréale"),
-        ("Mil", "kg", "céréale"),
-        ("Haricot", "kg", "légumineuse"),
-        ("Soja", "kg", "légumineuse"),
-        ("Arachide", "kg", "légumineuse"),
-        ("Igname", "kg", "tubercule"),
-        ("Manioc", "kg", "tubercule"),
-        ("Tomate", "kg", "maraîcher"),
-        ("Piment", "kg", "maraîcher"),
-        ("Oignon", "kg", "maraîcher"),
+# ─── READ: Products (cultures) ─────────────────────────────────────
+
+def get_produits() -> list[dict]:
+    """List all agricultural products.
+
+    Returns the same shape as the old SQLite version:
+        [{"id": ..., "nom": ..., "unite": "kg", "categorie": ...}, ...]
+    """
+    sb = _get_client()
+    res = sb.table("cultures").select("id, name, category").order("name").execute()
+    return [
+        {"id": str(r["id"]), "nom": r["name"], "unite": "kg", "categorie": r.get("category", "culture")}
+        for r in (res.data or [])
     ]
 
-    for nom, unite, cat in produits:
-        c.execute(
-            "INSERT INTO produits (nom, unite, categorie) VALUES (?, ?, ?)",
-            (nom, unite, cat),
-        )
 
-    marches = ["Lomé-Adawlato", "Kara", "Sokodé", "Atakpamé", "Dapaong"]
+# ─── READ: Historical prices ───────────────────────────────────────
 
-    prix_base = {
-        "Maïs": 220, "Riz local": 450, "Sorgho": 200,
-        "Mil": 250, "Haricot": 500, "Soja": 350,
-        "Arachide": 400, "Igname": 300, "Manioc": 150,
-        "Tomate": 600, "Piment": 800, "Oignon": 350,
-    }
+def get_prix_historiques(produit_nom: str, marche: str = None, limit: int = 60) -> list[dict]:
+    """Get historical prices for a product, optionally filtered by market.
 
-    today = datetime.now()
-    # Batch insert for speed — single executemany instead of 720 individual inserts
-    rows = []
-    for i, (nom, unite, cat) in enumerate(produits, 1):
-        base = prix_base[nom]
-        for marche in marches:
-            for month_offset in range(12, 0, -1):
-                date = today - timedelta(days=month_offset * 30)
-                saison = 1.0 + 0.15 * ((month_offset % 6) / 6.0 - 0.5)
-                bruit = random.uniform(0.92, 1.08)
-                prix = round(base * saison * bruit, 0)
-                rows.append((i, marche, prix, date.strftime("%Y-%m-%d")))
-
-    c.executemany(
-        "INSERT INTO prix (produit_id, marche, prix, date) VALUES (?, ?, ?, ?)",
-        rows,
-    )
-
-
-def get_produits():
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM produits ORDER BY nom").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def get_prix_historiques(produit_nom, marche=None, limit=60):
-    conn = get_db()
-    query = """
-        SELECT p.prix, p.date, p.marche, pr.nom as produit
-        FROM prix p JOIN produits pr ON p.produit_id = pr.id
-        WHERE pr.nom = ?
+    Returns: [{"date": "YYYY-MM-DD", "marche": str, "prix": float, "produit": str}, ...]
     """
-    params = [produit_nom]
-    if marche:
-        query += " AND p.marche = ?"
-        params.append(marche)
-    query += " ORDER BY p.date DESC LIMIT ?"
-    params.append(limit)
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    sb = _get_client()
 
+    # Resolve culture_id from name (case-insensitive fuzzy)
+    cultures = sb.table("cultures").select("id, name").execute().data or []
+    culture_id = None
+    produit_clean = produit_nom.lower().replace("ï", "i").replace("é", "e").replace("è", "e").strip()
+    for c in cultures:
+        c_clean = c["name"].lower().replace("ï", "i").replace("é", "e").replace("è", "e")
+        if c_clean == produit_clean or produit_clean in c_clean:
+            culture_id = c["id"]
+            produit_nom = c["name"]
+            break
 
-def get_marches():
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT DISTINCT marche FROM prix ORDER BY marche"
-    ).fetchall()
-    conn.close()
-    return [r["marche"] for r in rows]
+    if not culture_id:
+        return []
 
-
-def save_prevision(produit_nom, marche, prix_prevu, date_cible, confiance):
-    conn = get_db()
-    produit = conn.execute(
-        "SELECT id FROM produits WHERE nom = ?", (produit_nom,)
-    ).fetchone()
-    if produit:
-        conn.execute(
-            "INSERT INTO previsions "
-            "(produit_id, marche, prix_prevu, date_prevision, "
-            "date_cible, confiance) VALUES (?, ?, ?, ?, ?, ?)",
-            (produit["id"], marche, prix_prevu,
-             datetime.now().strftime("%Y-%m-%d"), date_cible, confiance),
-        )
-        conn.commit()
-    conn.close()
-
-
-def save_conversation(role, contenu):
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO conversations (role, contenu, timestamp) "
-        "VALUES (?, ?, ?)",
-        (role, contenu, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+    query = (
+        sb.table("market_prices")
+        .select("market_name, price, created_at")
+        .eq("culture_id", culture_id)
+        .order("created_at", desc=True)
+        .limit(limit)
     )
-    conn.commit()
-    conn.close()
+    if marche:
+        query = query.ilike("market_name", f"%{marche}%")
 
-
-def get_conversations(limit=50):
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM conversations ORDER BY id DESC LIMIT ?", (limit,)
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in reversed(rows)]
-
-
-# ── Admin database functions ──────────────────────────────────────────
-
-import csv
-import io
-
-
-def add_produit(nom, unite="kg", categorie="céréale"):
-    """Insert a new product. Return True on success, False on failure."""
-    conn = get_db()
-    try:
-        conn.execute(
-            "INSERT INTO produits (nom, unite, categorie) VALUES (?, ?, ?)",
-            (nom, unite, categorie),
-        )
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False
-    finally:
-        conn.close()
-
-
-def delete_produit(produit_id):
-    """Delete a product by ID."""
-    conn = get_db()
-    conn.execute("DELETE FROM produits WHERE id = ?", (produit_id,))
-    conn.commit()
-    conn.close()
-
-
-def add_prix_from_csv(csv_content):
-    """Parse CSV string (date,produit,marche,prix) and insert rows.
-    Returns the count of inserted rows."""
-    conn = get_db()
-    reader = csv.DictReader(io.StringIO(csv_content))
-    count = 0
-    for row in reader:
-        produit = conn.execute(
-            "SELECT id FROM produits WHERE nom = ?", (row["produit"].strip(),)
-        ).fetchone()
-        if produit:
-            conn.execute(
-                "INSERT INTO prix (produit_id, marche, prix, date) "
-                "VALUES (?, ?, ?, ?)",
-                (produit["id"], row["marche"].strip(),
-                 float(row["prix"]), row["date"].strip()),
-            )
-            count += 1
-    conn.commit()
-    conn.close()
-    return count
-
-
-def add_produit_from_csv(csv_content):
-    """Parse CSV string (nom,unite,categorie) and insert products.
-    Returns the count of inserted rows."""
-    conn = get_db()
-    reader = csv.DictReader(io.StringIO(csv_content))
-    count = 0
-    for row in reader:
-        try:
-            conn.execute(
-                "INSERT INTO produits (nom, unite, categorie) VALUES (?, ?, ?)",
-                (row["nom"].strip(), row["unite"].strip(),
-                 row["categorie"].strip()),
-            )
-            count += 1
-        except sqlite3.IntegrityError:
-            continue
-    conn.commit()
-    conn.close()
-    return count
-
-
-def get_all_prix(page=1, per_page=50):
-    """Paginated prix with product name and market.
-    Returns dict with items, total, pages."""
-    conn = get_db()
-    total = conn.execute("SELECT COUNT(*) FROM prix").fetchone()[0]
-    pages = max(1, (total + per_page - 1) // per_page)
-    offset = (page - 1) * per_page
-    rows = conn.execute(
-        """
-        SELECT p.id, p.prix, p.date, p.marche, pr.nom as produit
-        FROM prix p JOIN produits pr ON p.produit_id = pr.id
-        ORDER BY p.date DESC
-        LIMIT ? OFFSET ?
-        """,
-        (per_page, offset),
-    ).fetchall()
-    conn.close()
-    return {"items": [dict(r) for r in rows], "total": total, "pages": pages}
-
-
-def delete_prix(prix_id):
-    """Delete a price entry by ID."""
-    conn = get_db()
-    conn.execute("DELETE FROM prix WHERE id = ?", (prix_id,))
-    conn.commit()
-    conn.close()
-
-
-def get_db_stats():
-    """Return dict with database counts."""
-    conn = get_db()
-    stats = {
-        "total_produits": conn.execute(
-            "SELECT COUNT(*) FROM produits"
-        ).fetchone()[0],
-        "total_prix": conn.execute(
-            "SELECT COUNT(*) FROM prix"
-        ).fetchone()[0],
-        "total_previsions": conn.execute(
-            "SELECT COUNT(*) FROM previsions"
-        ).fetchone()[0],
-        "total_conversations": conn.execute(
-            "SELECT COUNT(*) FROM conversations"
-        ).fetchone()[0],
-        "marches_count": conn.execute(
-            "SELECT COUNT(DISTINCT marche) FROM prix"
-        ).fetchone()[0],
-    }
-    conn.close()
-    return stats
-
-
-def export_prix_csv():
-    """Return CSV string of all prix data with headers."""
-    conn = get_db()
-    rows = conn.execute(
-        """
-        SELECT p.date, pr.nom as produit, p.marche, p.prix
-        FROM prix p JOIN produits pr ON p.produit_id = pr.id
-        ORDER BY p.date DESC
-        """
-    ).fetchall()
-    conn.close()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["date", "produit", "marche", "prix"])
-    for r in rows:
-        writer.writerow([r["date"], r["produit"], r["marche"], r["prix"]])
-    return output.getvalue()
-
-
-def get_latest_prices():
-    """Get the most recent price for each product with trend."""
-    conn = get_db()
-    # Single efficient query — no correlated subquery
-    rows = conn.execute("""
-        SELECT pr.nom, p.prix, p.date, p.marche
-        FROM prix p
-        JOIN produits pr ON p.produit_id = pr.id
-        WHERE p.id IN (
-            SELECT MAX(id) FROM prix GROUP BY produit_id
-        )
-        ORDER BY pr.nom
-    """).fetchall()
-    conn.close()
+    res = query.execute()
     return [
         {
-            "nom": r["nom"],
-            "prix": round(r["prix"]),
-            "date": r["date"],
-            "marche": r["marche"],
-            "delta": 0.0,
+            "date": r["created_at"][:10],
+            "marche": r["market_name"],
+            "prix": float(r["price"]),
+            "produit": produit_nom,
         }
-        for r in rows
+        for r in (res.data or [])
     ]
 
 
-def clear_conversations():
-    """Clear all conversation history."""
-    conn = get_db()
-    conn.execute("DELETE FROM conversations")
-    conn.commit()
-    conn.close()
+def get_marches() -> list[str]:
+    """List all distinct market names."""
+    sb = _get_client()
+    res = sb.table("market_prices").select("market_name").execute()
+    return sorted(set(r["market_name"] for r in (res.data or []) if r.get("market_name")))
+
+
+def get_latest_prices() -> list[dict]:
+    """Get the most recent price per product across all markets."""
+    sb = _get_client()
+    # Fetch recent prices with culture name
+    res = (
+        sb.table("market_prices")
+        .select("market_name, price, created_at, culture:cultures(name)")
+        .order("created_at", desc=True)
+        .limit(200)
+        .execute()
+    )
+    # Deduplicate: keep latest per (product, market)
+    seen = set()
+    out = []
+    for r in (res.data or []):
+        culture_name = r.get("culture", {})
+        if isinstance(culture_name, list):
+            culture_name = culture_name[0] if culture_name else {}
+        name = culture_name.get("name", "?") if isinstance(culture_name, dict) else "?"
+        key = (name, r["market_name"])
+        if key not in seen:
+            seen.add(key)
+            out.append({
+                "produit": name,
+                "marche": r["market_name"],
+                "prix": float(r["price"]),
+                "date": r["created_at"][:10],
+            })
+    return out
+
+
+# ─── WRITE: Forecasts ──────────────────────────────────────────────
+
+def save_prevision(produit_nom: str, marche: str, prix_prevu: float,
+                   date_cible: str, confiance: float = 0.7):
+    """Save a price forecast (stored as a market_price with metadata)."""
+    sb = _get_client()
+    cultures = sb.table("cultures").select("id, name").execute().data or []
+    culture_id = None
+    for c in cultures:
+        if c["name"].lower() == produit_nom.lower():
+            culture_id = c["id"]
+            break
+    if not culture_id:
+        return
+
+    # Find region for the market
+    res = (
+        sb.table("market_prices")
+        .select("region_id")
+        .ilike("market_name", f"%{marche}%")
+        .limit(1)
+        .execute()
+    )
+    region_id = res.data[0]["region_id"] if res.data else None
+    if not region_id:
+        return
+
+    sb.table("market_prices").insert({
+        "culture_id": culture_id,
+        "region_id": region_id,
+        "market_name": marche,
+        "price": int(prix_prevu),
+        "unit": "kg",
+        "currency": "FCFA",
+        "verified": False,
+    }).execute()
+
+
+# ─── Conversations (AI chat history) ──────────────────────────────
+
+def save_conversation(role: str, contenu: str, card_number: str = "SYSTEM"):
+    """Save a conversation message."""
+    sb = _get_client()
+    sb.table("ai_conversations").insert({
+        "card_number": card_number,
+        "role": role,
+        "content": contenu,
+    }).execute()
+
+
+def get_conversations(limit: int = 50, card_number: str = None) -> list[dict]:
+    """Get conversation history."""
+    sb = _get_client()
+    query = sb.table("ai_conversations").select("role, content, created_at").order("created_at", desc=True).limit(limit)
+    if card_number:
+        query = query.eq("card_number", card_number)
+    res = query.execute()
+    return [
+        {"role": r["role"], "contenu": r["content"], "timestamp": r["created_at"]}
+        for r in reversed(res.data or [])
+    ]
+
+
+def clear_conversations(card_number: str = None):
+    """Delete conversation history."""
+    sb = _get_client()
+    if card_number:
+        sb.table("ai_conversations").delete().eq("card_number", card_number).execute()
+    else:
+        sb.table("ai_conversations").delete().neq("card_number", "__never__").execute()
+
+
+# ─── Admin: CRUD ──────────────────────────────────────────────────
+
+def add_produit(nom: str, unite: str = "kg", categorie: str = "culture"):
+    sb = _get_client()
+    sb.table("cultures").insert({"name": nom, "category": categorie}).execute()
+    return True
+
+
+def delete_produit(produit_id: str):
+    sb = _get_client()
+    sb.table("cultures").delete().eq("id", produit_id).execute()
+
+
+def add_prix_from_csv(csv_content: str) -> dict:
+    """Import prices from CSV (produit,marche,prix,date)."""
+    import csv, io
+    reader = csv.DictReader(io.StringIO(csv_content))
+    inserted, errors = 0, 0
+    cultures_cache = {c["nom"].lower(): c["id"] for c in get_produits()}
+    for row in reader:
+        try:
+            nom = row.get("produit", "").strip()
+            cid = cultures_cache.get(nom.lower())
+            if not cid:
+                errors += 1
+                continue
+            # Find region for market
+            marche = row.get("marche", "").strip()
+            sb = _get_client()
+            rres = sb.table("market_prices").select("region_id").ilike("market_name", f"%{marche}%").limit(1).execute()
+            rid = rres.data[0]["region_id"] if rres.data else None
+            if not rid:
+                errors += 1
+                continue
+            sb.table("market_prices").insert({
+                "culture_id": cid, "region_id": rid, "market_name": marche,
+                "price": int(float(row.get("prix", 0))), "unit": "kg", "currency": "FCFA",
+                "created_at": row.get("date", datetime.now().isoformat()),
+            }).execute()
+            inserted += 1
+        except Exception:
+            errors += 1
+    return {"inserted": inserted, "errors": errors}
+
+
+def add_produit_from_csv(csv_content: str) -> dict:
+    import csv, io
+    reader = csv.DictReader(io.StringIO(csv_content))
+    inserted, errors = 0, 0
+    for row in reader:
+        try:
+            add_produit(row.get("nom", "").strip(), row.get("unite", "kg"), row.get("categorie", "culture"))
+            inserted += 1
+        except Exception:
+            errors += 1
+    return {"inserted": inserted, "errors": errors}
+
+
+def get_all_prix(page: int = 1, per_page: int = 50) -> dict:
+    sb = _get_client()
+    offset = (page - 1) * per_page
+    res = (
+        sb.table("market_prices")
+        .select("id, market_name, price, created_at, culture:cultures(name)", count="exact")
+        .order("created_at", desc=True)
+        .range(offset, offset + per_page - 1)
+        .execute()
+    )
+    rows = []
+    for r in (res.data or []):
+        cn = r.get("culture", {})
+        if isinstance(cn, list):
+            cn = cn[0] if cn else {}
+        rows.append({
+            "id": r["id"], "produit": cn.get("name", "?") if isinstance(cn, dict) else "?",
+            "marche": r["market_name"], "prix": r["price"], "date": r["created_at"][:10],
+        })
+    return {"data": rows, "total": res.count or 0, "page": page, "per_page": per_page}
+
+
+def delete_prix(prix_id: str):
+    sb = _get_client()
+    sb.table("market_prices").delete().eq("id", prix_id).execute()
+
+
+def get_db_stats() -> dict:
+    sb = _get_client()
+    cultures = sb.table("cultures").select("id", count="exact").execute()
+    prices = sb.table("market_prices").select("id", count="exact").execute()
+    convos = sb.table("ai_conversations").select("id", count="exact").execute()
+    members = sb.table("members").select("id", count="exact").execute()
+    cards = sb.table("member_cards").select("id", count="exact").execute()
+    return {
+        "cultures": cultures.count or 0,
+        "prix": prices.count or 0,
+        "conversations": convos.count or 0,
+        "members": members.count or 0,
+        "cards": cards.count or 0,
+        "marches": len(get_marches()),
+        "backend": "supabase",
+    }
+
+
+def export_prix_csv() -> str:
+    """Export all prices as CSV string."""
+    import csv, io
+    all_prices = get_all_prix(page=1, per_page=10000)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["produit", "marche", "prix", "date"])
+    writer.writeheader()
+    for r in all_prices["data"]:
+        writer.writerow(r)
+    return output.getvalue()

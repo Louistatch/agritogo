@@ -105,3 +105,85 @@ def kpi():
 @api_bp.route("/stats")
 def stats():
     return jsonify(get_db_stats())
+
+
+# ─── Agent Chat Endpoint (multi-agent Decision Intelligence Engine) ────
+
+@api_bp.route("/agent/chat", methods=["POST"])
+def agent_chat():
+    """Full multi-agent chat endpoint.
+
+    POST /api/v1/agent/chat
+    Body: {"message": str, "card_number": str (optional), "audience": str (optional)}
+
+    Uses the Decision Intelligence Engine with:
+    - Intelligent routing (market_intel / quant_forecast / risk / decision)
+    - Multi-model debate for high-stakes decisions
+    - 14 tools (market data, ML models, KoboCollect)
+    - UX reformulation for the target audience
+    """
+    import asyncio
+    from app.agents.engine import process_query, _AGENTSCOPE_AVAILABLE
+
+    body = request.get_json(force=True, silent=True) or {}
+    message = (body.get("message") or "").strip()
+    card_number = (body.get("card_number") or "").strip()
+    audience = body.get("audience", "farmer")
+
+    if not message:
+        return jsonify({"error": "message requis"}), 400
+
+    if not _AGENTSCOPE_AVAILABLE:
+        return jsonify({
+            "error": "Le moteur multi-agent n'est pas disponible (agentscope non installé).",
+            "agentscope_available": False,
+        }), 503
+
+    try:
+        # Enrich the question with producer context if card_number provided
+        enriched = message
+        if card_number:
+            from app.database import get_prix_historiques, get_latest_prices
+            # Add local context
+            latest = get_latest_prices()
+            if latest:
+                price_ctx = "; ".join(
+                    f"{p['produit']}={p['prix']}FCFA à {p['marche']}"
+                    for p in latest[:8]
+                )
+                enriched = (
+                    f"[Carte: {card_number}] "
+                    f"[Prix récents: {price_ctx}] "
+                    f"{message}"
+                )
+
+        # Run the multi-agent engine
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(process_query(enriched, audience))
+        finally:
+            loop.close()
+
+        # Save conversation
+        if card_number:
+            from app.database import save_conversation
+            save_conversation("user", message, card_number)
+            save_conversation("assistant", result.get("formatted_response", ""), card_number)
+
+        return jsonify({
+            "response": result.get("formatted_response", ""),
+            "agent_type": result.get("agent_type"),
+            "model_used": result.get("model_used"),
+            "debate_used": result.get("debate_used", False),
+            "agentscope_available": True,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "error": str(e),
+            "type": type(e).__name__,
+            "agentscope_available": _AGENTSCOPE_AVAILABLE,
+        }), 500
