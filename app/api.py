@@ -143,19 +143,24 @@ def agent_chat():
         # Enrich the question with producer context if card_number provided
         enriched = message
         if card_number:
-            from app.database import get_prix_historiques, get_latest_prices
-            # Add local context
-            latest = get_latest_prices()
-            if latest:
-                price_ctx = "; ".join(
-                    f"{p['nom']}={p['prix']}FCFA à {p['marche']}"
-                    for p in latest[:8]
-                )
-                enriched = (
-                    f"[Carte: {card_number}] "
-                    f"[Prix récents: {price_ctx}] "
-                    f"{message}"
-                )
+            try:
+                from app.database import get_prix_historiques, get_latest_prices
+                # Add local context
+                latest = get_latest_prices()
+                if latest:
+                    price_ctx = "; ".join(
+                        f"{p.get('nom', p.get('produit', '?'))}={p.get('prix', 0)}FCFA à {p.get('marche', '?')}"
+                        for p in latest[:8]
+                    )
+                    enriched = (
+                        f"[Carte: {card_number}] "
+                        f"[Prix récents: {price_ctx}] "
+                        f"{message}"
+                    )
+            except Exception as ctx_err:
+                import logging
+                logging.warning(f"[agent_chat] Price context failed: {ctx_err}")
+                enriched = f"[Carte: {card_number}] {message}"
 
         # Run the multi-agent engine
         loop = asyncio.new_event_loop()
