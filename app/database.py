@@ -216,12 +216,13 @@ def get_conversations(limit: int = 50, card_number: str = None) -> list[dict]:
 
 
 def clear_conversations(card_number: str = None):
-    """Delete conversation history."""
+    """Delete conversation history. Requires card_number for safety."""
     sb = _get_client()
     if card_number:
         sb.table("ai_conversations").delete().eq("card_number", card_number).execute()
     else:
-        sb.table("ai_conversations").delete().neq("card_number", "__never__").execute()
+        # Safety: only clear SYSTEM conversations, never user data without explicit card
+        sb.table("ai_conversations").delete().eq("card_number", "SYSTEM").execute()
 
 
 # ─── Admin: CRUD ──────────────────────────────────────────────────

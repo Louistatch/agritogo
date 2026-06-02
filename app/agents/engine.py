@@ -166,17 +166,19 @@ async def _call_agent(agent_type: str, question: str, model: str = None) -> str:
 
 
 async def _debate(question: str) -> dict:
-    """Multi-model debate: Gemini proposes, Qwen critiques, Coordinator arbitrates."""
+    """Multi-model debate: Gemini proposes, second opinion critiques, Coordinator arbitrates."""
     # Step 1: Gemini proposes strategy
     gemini_response = await _call_agent("decision", question, "gemini")
 
-    # Step 2: Qwen critiques with quantitative analysis
+    # Step 2: Critique with quantitative analysis (Qwen if available, else Gemini risk agent)
     critique_q = (
         f"Voici une recommandation stratégique. Critique-la avec des données "
         f"quantitatives et identifie les failles:\n\n{gemini_response}\n\n"
         f"Question originale: {question}"
     )
-    qwen_response = await _call_agent("risk_volatility", critique_q, "qwen")
+    # Use Qwen only if DASHSCOPE_API_KEY is set, otherwise use Gemini risk agent
+    critique_model = "qwen" if os.environ.get("DASHSCOPE_API_KEY", "").strip() else "gemini"
+    qwen_response = await _call_agent("risk_volatility", critique_q, critique_model)
 
     # Step 3: Coordinator arbitrates
     arbitration_q = (

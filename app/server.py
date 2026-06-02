@@ -286,7 +286,7 @@ def chat():
     save_conversation("user", message)
     response = run_async(ask_agent(message + lang_suffix, model_choice))
     emit_thought(sid, "done", "Response ready")
-    save_conversation("agent", response)
+    save_conversation("assistant", response)
     conversations = get_conversations()
     return render_template("partials/chat_messages.html", conversations=conversations)
 
@@ -450,7 +450,7 @@ def engine_query():
     emit_thought(sid, "decision", result.get("formatted_response", "")[:120] + "...", "Decision Agent")
     emit_thought(sid, "done", "Analysis complete")
     save_conversation("user", question)
-    save_conversation("engine", result.get("formatted_response", ""))
+    save_conversation("assistant", result.get("formatted_response", ""))
     return render_template("partials/engine_result.html", result=result)
 
 

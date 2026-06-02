@@ -69,9 +69,9 @@ def admin_add_produit():
         msg = f"{nom} added" if ok else f"{nom} already exists"
     return render_template("partials/admin_produits.html", produits=get_produits(), msg=msg)
 
-@admin_bp.route("/produit/delete/<int:pid>", methods=["DELETE"])
+@admin_bp.route("/produit/delete/<pid>", methods=["DELETE"])
 def admin_delete_produit(pid):
-    delete_produit(pid)
+    delete_produit(str(pid))
     return render_template("partials/admin_produits.html", produits=get_produits(), msg="Deleted")
 
 @admin_bp.route("/prix", methods=["GET"])
@@ -80,9 +80,9 @@ def admin_prix():
     data = get_all_prix(page=page)
     return render_template("partials/admin_prix.html", data=data, page=page)
 
-@admin_bp.route("/prix/delete/<int:pid>", methods=["DELETE"])
+@admin_bp.route("/prix/delete/<pid>", methods=["DELETE"])
 def admin_delete_prix(pid):
-    delete_prix(pid)
+    delete_prix(str(pid))
     return render_template("partials/admin_prix.html", data=get_all_prix(page=1), page=1)
 
 @admin_bp.route("/upload/prix", methods=["POST"])
@@ -90,8 +90,10 @@ def admin_upload_prix():
     f = request.files.get("file")
     msg = "CSV file required"
     if f and f.filename.endswith(".csv"):
-        count = add_prix_from_csv(f.read().decode("utf-8"))
-        msg = f"{count} price entries imported"
+        result = add_prix_from_csv(f.read().decode("utf-8"))
+        ins = result.get("inserted", 0) if isinstance(result, dict) else result
+        err = result.get("errors", 0) if isinstance(result, dict) else 0
+        msg = f"{ins} prix importés ({err} erreurs)" if err else f"{ins} prix importés"
     return render_template("partials/admin_stats.html", stats=get_db_stats(), msg=msg)
 
 @admin_bp.route("/upload/produits", methods=["POST"])
@@ -99,8 +101,9 @@ def admin_upload_produits():
     f = request.files.get("file")
     msg = "CSV file required"
     if f and f.filename.endswith(".csv"):
-        count = add_produit_from_csv(f.read().decode("utf-8"))
-        msg = f"{count} products imported"
+        result = add_produit_from_csv(f.read().decode("utf-8"))
+        ins = result.get("inserted", 0) if isinstance(result, dict) else result
+        msg = f"{ins} produits importés"
     return render_template("partials/admin_produits.html", produits=get_produits(), msg=msg)
 
 @admin_bp.route("/upload/dataset", methods=["POST"])
