@@ -66,25 +66,16 @@ def _load_ml_modules():
         if _STARTUP_DONE:
             return
         try:
-            print("[STARTUP] Loading ML modules...")
+            print("[STARTUP] Loading ML modules...", flush=True)
             t0 = time.time()
 
-            from app.agent import ask_agent as _ask
-            from app.agents.engine import (
-                process_query as _pq,
-                get_memory as _gm,
-                add_feedback as _af,
-            )
+            # ML modules FIRST — these are pure Python/sklearn, always work
             from app.ml.crop_yield import run_crop_yield_prediction as _cy
             from app.ml.garch_volatility import run_garch_forecast as _gf
             from app.ml.financial_risk import run_risk_assessment as _ra
             from app.ml.farmer_segmentation import run_farmer_segmentation as _fs
             from app.ml.kpi_dashboard import get_kpi_data as _kd
 
-            ask_agent = _ask
-            process_query = _pq
-            get_memory = _gm
-            add_feedback = _af
             run_crop_yield_prediction = _cy
             run_garch_forecast = _gf
             run_risk_assessment = _ra
@@ -92,7 +83,23 @@ def _load_ml_modules():
             get_kpi_data = _kd
 
             _ML_AVAILABLE = True
-            print(f"[STARTUP] ML modules loaded in {time.time()-t0:.1f}s")
+            print(f"[STARTUP] ML modules loaded in {time.time()-t0:.1f}s", flush=True)
+
+            # Agent modules SECOND — depend on agentscope (may fail, non-fatal)
+            try:
+                from app.agent import ask_agent as _ask
+                from app.agents.engine import (
+                    process_query as _pq,
+                    get_memory as _gm,
+                    add_feedback as _af,
+                )
+                ask_agent = _ask
+                process_query = _pq
+                get_memory = _gm
+                add_feedback = _af
+                print("[STARTUP] Agent modules loaded", flush=True)
+            except Exception as ae:
+                print(f"[STARTUP] Agent modules failed (non-fatal): {ae}", flush=True)
         except Exception as e:
             print(f"[STARTUP] ML load failed: {e}")
             _ML_AVAILABLE = False
@@ -171,6 +178,9 @@ from app.api import api_bp
 
 app.register_blueprint(admin_bp)
 app.register_blueprint(api_bp)
+
+# Trigger ML loading in background immediately after app is ready
+_trigger_ml_load()
 
 try:
     init_db()
@@ -367,6 +377,9 @@ def ml_interpret():
 
 @app.route("/ml/crop-yield", methods=["POST"])
 def ml_crop_yield():
+    if not run_crop_yield_prediction:
+        _trigger_ml_load()
+        return "<div class='error'>Modèles ML en cours de chargement, réessayez dans quelques secondes.</div>", 503
     crop = request.form.get("crop", "Mais")
     result = run_crop_yield_prediction(crop=crop)
     return render_template("partials/ml_result.html", title=f"Yield Prediction — {crop}", result=result, module="crop_yield")
@@ -374,6 +387,8 @@ def ml_crop_yield():
 
 @app.route("/ml/garch", methods=["POST"])
 def ml_garch():
+    if not run_garch_forecast:
+        return "<div class='error'>Modèles ML en cours de chargement.</div>", 503
     produit = request.form.get("produit", "Maïs")
     result = run_garch_forecast(product=produit)
     return render_template("partials/ml_result.html", title="📈 Volatilité GARCH", result=result, module="garch")
@@ -381,18 +396,24 @@ def ml_garch():
 
 @app.route("/ml/risk", methods=["POST"])
 def ml_risk():
+    if not run_risk_assessment:
+        return "<div class='error'>Modèles ML en cours de chargement.</div>", 503
     result = run_risk_assessment()
     return render_template("partials/ml_result.html", title="⚠️ Risque Financier", result=result, module="risk")
 
 
 @app.route("/ml/segmentation", methods=["POST"])
 def ml_segmentation():
+    if not run_farmer_segmentation:
+        return "<div class='error'>Modèles ML en cours de chargement.</div>", 503
     result = run_farmer_segmentation()
     return render_template("partials/ml_result.html", title="👥 Segmentation", result=result, module="segmentation")
 
 
 @app.route("/ml/kpi", methods=["POST"])
 def ml_kpi():
+    if not get_kpi_data:
+        return "<div class='error'>Modèles ML en cours de chargement.</div>", 503
     result = get_kpi_data()
     return render_template("partials/ml_result.html", title="📊 KPIs Agriculture", result=result, module="kpi")
 
