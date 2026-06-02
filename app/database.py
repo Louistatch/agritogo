@@ -107,34 +107,49 @@ def get_marches() -> list[str]:
 
 
 def get_latest_prices() -> list[dict]:
-    """Get the most recent price per product across all markets."""
+    """Get the most recent price per product across all markets.
+
+    Returns dicts with: nom, prix, marche, date, delta (% change vs previous).
+    """
     sb = _get_client()
-    # Fetch recent prices with culture name
     res = (
         sb.table("market_prices")
         .select("market_name, price, created_at, culture:cultures(name)")
         .order("created_at", desc=True)
-        .limit(200)
+        .limit(400)
         .execute()
     )
-    # Deduplicate: keep latest per (product, market)
-    seen = set()
-    out = []
+    # Group by product: collect all prices sorted by date desc
+    from collections import defaultdict
+    by_product: dict[str, list[dict]] = defaultdict(list)
     for r in (res.data or []):
         culture_name = r.get("culture", {})
         if isinstance(culture_name, list):
             culture_name = culture_name[0] if culture_name else {}
         name = culture_name.get("name", "?") if isinstance(culture_name, dict) else "?"
-        key = (name, r["market_name"])
-        if key not in seen:
-            seen.add(key)
-            out.append({
-                "produit": name,
-                "marche": r["market_name"],
-                "prix": float(r["price"]),
-                "date": r["created_at"][:10],
-            })
-    return out
+        by_product[name].append({
+            "marche": r["market_name"],
+            "prix": float(r["price"]),
+            "date": r["created_at"][:10],
+        })
+
+    out = []
+    for name, prices in by_product.items():
+        latest = prices[0]
+        # Compute delta: % change between latest and previous price
+        delta = 0.0
+        if len(prices) >= 2:
+            prev = prices[1]["prix"]
+            if prev > 0:
+                delta = round(((latest["prix"] - prev) / prev) * 100, 1)
+        out.append({
+            "nom": name,
+            "prix": int(latest["prix"]),
+            "marche": latest["marche"],
+            "date": latest["date"],
+            "delta": delta,
+        })
+    return sorted(out, key=lambda x: x["nom"])
 
 
 # ─── WRITE: Forecasts ──────────────────────────────────────────────
