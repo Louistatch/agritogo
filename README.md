@@ -130,3 +130,4 @@ Apache 2.0
 ---
 
 *AgriTogo uses [AgentScope](https://github.com/agentscope-ai/agentscope) as its multi-agent framework foundation.*
+
