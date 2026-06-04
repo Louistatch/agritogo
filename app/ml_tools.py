@@ -103,3 +103,50 @@ async def obtenir_kpi_agriculture() -> ToolResponse:
         lines.append(f"  {c['crop']}: ROI {c['roi_percent']}% "
                      f"(profit {c['profit_fcfa_ha']:,} FCFA/ha)")
     return ToolResponse(content="\n".join(lines))
+
+
+async def consulter_meteo_region(region: str = "Centrale") -> ToolResponse:
+    """Consulte les données météo réelles d'une région du Togo.
+
+    Sources: NASA POWER (historique) + Open-Meteo (prévisions).
+    Données: température, précipitations, humidité, radiation solaire, vent.
+
+    Args:
+        region: Nom de la région (Maritime, Plateaux, Centrale, Kara, Savanes)
+
+    Returns:
+        Conditions météo actuelles et tendances sur les 30 derniers jours.
+    """
+    from app.climate import TOGO_REGION_COORDS, get_climate_for_location
+    coords = TOGO_REGION_COORDS.get(region, TOGO_REGION_COORDS["Centrale"])
+    data = get_climate_for_location(coords["lat"], coords["lon"], days=30)
+
+    lines = [f"🌦️ Météo {region} (derniers 30 jours)", ""]
+    lines.append(f"Source: {data.get('source', 'inconnu')}")
+    lines.append(f"Température moyenne: {data.get('avg_temp', '?')}°C")
+    if data.get('temp_max'):
+        lines.append(f"Température max: {data['temp_max']}°C | min: {data['temp_min']}°C")
+    lines.append(f"Précipitations totales: {data.get('total_rainfall_mm', '?')} mm")
+    lines.append(f"Pluie moyenne/jour: {data.get('avg_daily_rain_mm', '?')} mm")
+    lines.append(f"Jours secs: {data.get('dry_days', '?')}")
+    lines.append(f"Indice sécheresse: {data.get('drought_index', '?')}")
+    if data.get('avg_humidity'):
+        lines.append(f"Humidité moyenne: {data['avg_humidity']}%")
+    lines.append(f"Points de données: {data.get('data_points', 0)}")
+    return ToolResponse(content="\n".join(lines))
+
+
+async def rafraichir_donnees_climat() -> ToolResponse:
+    """Rafraîchit les données climatiques pour toutes les régions du Togo.
+
+    Appelle NASA POWER (historique 90j) + Open-Meteo (prévisions 16j).
+    Les données sont stockées dans Supabase pour les modèles ML.
+
+    Returns:
+        Nombre d'enregistrements mis à jour.
+    """
+    from app.climate import refresh_climate_data
+    total = refresh_climate_data(days_back=90)
+    return ToolResponse(content=f"✅ Données climatiques rafraîchies: {total} enregistrements stockés dans Supabase.\n"
+                                f"Sources: NASA POWER (90 jours historiques) + Open-Meteo (16 jours prévisions).\n"
+                                f"Régions: Maritime, Plateaux, Centrale, Kara, Savanes.")

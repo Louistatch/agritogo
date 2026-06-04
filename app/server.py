@@ -100,6 +100,20 @@ def _load_ml_modules():
                 print("[STARTUP] Agent modules loaded", flush=True)
             except Exception as ae:
                 print(f"[STARTUP] Agent modules failed (non-fatal): {ae}", flush=True)
+
+            # Refresh climate data from NASA POWER + Open-Meteo (background, non-fatal)
+            try:
+                from app.climate import refresh_climate_data
+                import threading
+                def _bg_climate():
+                    try:
+                        n = refresh_climate_data(days_back=30)
+                        print(f"[STARTUP] Climate data refreshed: {n} records", flush=True)
+                    except Exception as ce:
+                        print(f"[STARTUP] Climate refresh failed (non-fatal): {ce}", flush=True)
+                threading.Thread(target=_bg_climate, daemon=True).start()
+            except Exception:
+                pass
         except Exception as e:
             print(f"[STARTUP] ML load failed: {e}")
             _ML_AVAILABLE = False

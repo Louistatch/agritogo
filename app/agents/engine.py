@@ -27,6 +27,8 @@ from app.tools import (
 )
 from app.ml_tools import (
     predire_rendement_cultures, prevoir_volatilite,
+    evaluer_risque_financier, segmenter_agriculteurs, obtenir_kpi_agriculture,
+    consulter_meteo_region, rafraichir_donnees_climat,
     evaluer_risque_financier, segmenter_agriculteurs,
     obtenir_kpi_agriculture,
 )
@@ -58,9 +60,9 @@ def _build_toolkit(tool_set="all"):
     market_tools = [consulter_prix, lister_produits, lister_marches,
                     enregistrer_prevision, analyser_tendance]
     ml_tools = [predire_rendement_cultures, prevoir_volatilite,
-                obtenir_kpi_agriculture]
+                obtenir_kpi_agriculture, consulter_meteo_region, rafraichir_donnees_climat]
     risk_tools = [evaluer_risque_financier, segmenter_agriculteurs,
-                  prevoir_volatilite]
+                  prevoir_volatilite, consulter_meteo_region]
     kobo_tools = [consulter_donnees_terrain, analyser_collecte_terrain,
                   generer_formulaire_prix, generer_formulaire_agriculteur]
 
