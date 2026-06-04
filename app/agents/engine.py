@@ -230,20 +230,41 @@ async def process_query(question: str, audience: str = "farmer") -> dict:
             raw_response = await _call_agent(agent_type, question, model)
             result["response"] = raw_response
 
-        # Format for audience if not already the UX agent
-        if agent_type != "ux_agent" and audience in ("farmer", "cooperative"):
+        # ── Detect model errors BEFORE passing to UX agent ──
+        if raw_response and ("⚠️" in raw_response or "indisponible" in raw_response
+                            or "quota" in raw_response.lower() or "RESOURCE_EXHAUSTED" in raw_response):
+            # Model failed — return clean error, do NOT pass garbage to UX agent
+            result["error"] = raw_response
+            result["formatted_response"] = (
+                "🔧 Le service est temporairement surchargé. "
+                "Veuillez réessayer dans quelques secondes. "
+                "Si le problème persiste, contactez votre coopérative."
+            )
+        elif agent_type != "ux_agent" and audience in ("farmer", "cooperative"):
+            # Normal response — format for audience
             ux_q = (
                 f"Reformule pour un {audience} togolais:\n\n{raw_response}"
             )
-            result["formatted_response"] = await _call_agent(
-                "ux_agent", ux_q, "gemini"
-            )
+            try:
+                result["formatted_response"] = await _call_agent(
+                    "ux_agent", ux_q, "gemini"
+                )
+            except Exception:
+                # UX agent also failed — return raw response (still better than error)
+                result["formatted_response"] = raw_response
         else:
             result["formatted_response"] = raw_response
 
     except Exception as e:
-        result["error"] = str(e)
-        result["formatted_response"] = f"⚠️ Erreur: {e}"
+        err_str = str(e)
+        result["error"] = err_str
+        if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
+            result["formatted_response"] = (
+                "🔧 Le service est temporairement surchargé (quota atteint). "
+                "Réessayez dans 30 secondes."
+            )
+        else:
+            result["formatted_response"] = f"⚠️ Une erreur est survenue. Réessayez dans un instant."
 
     # Store in memory for feedback loop
     _memory_store.append(result)
