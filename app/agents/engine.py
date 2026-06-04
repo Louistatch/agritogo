@@ -139,11 +139,14 @@ async def _call_agent(agent_type: str, question: str, model: str = None) -> str:
         err = str(e).lower()
         # Auto-fallback: if Gemini rate-limited, rotate key then switch to Qwen
         if "429" in err or "quota" in err or "rate" in err or "resource_exhausted" in err:
+            # Mark current key as exhausted (60s cooldown)
+            from app.key_rotation import mark_key_exhausted
+            mark_key_exhausted()
             # Try rotating Gemini key first
             if chosen_model == "gemini":
                 from app.key_rotation import rotate_gemini_key, get_all_keys_count
                 for _ in range(get_all_keys_count() - 1):
-                    rotate_gemini_key()
+                    new_key = rotate_gemini_key()
                     try:
                         # Clear cached agent for this type to use new key
                         new_key = rotate_gemini_key()
