@@ -181,7 +181,20 @@ app.register_blueprint(api_bp)
 
 # Trigger ML loading in background immediately after app is ready
 _trigger_ml_load()
+# Refresh climate data in background
+try:
+    from app.climate import refresh_climate_data
 
+    threading.Thread(
+        target=refresh_climate_data,
+        daemon=True
+    ).start()
+
+    print("[STARTUP] Climate refresh started", flush=True)
+
+except Exception as e:
+    print(f"[STARTUP] Climate refresh failed: {e}", flush=True)
+    
 try:
     init_db()
 except Exception as e:
