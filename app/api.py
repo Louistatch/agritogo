@@ -107,6 +107,121 @@ def stats():
     return jsonify(get_db_stats())
 
 
+# ─── AgriSmart — Irrigation Expert System ────────────────────────────
+
+@api_bp.route("/agrismart/crops")
+def agrismart_crops():
+    """Liste des cultures avec Kc mensuel et profondeur racinaire."""
+    from app.agrismart.kc_values import KC_VALUES, MOIS, IRRIGATION_SYSTEMS
+    crops = [
+        {
+            "id": name.lower().replace("è", "e").replace("â", "a"),
+            "name": name,
+            "emoji": data["emoji"],
+            "kc": data["kc"],
+            "z": data["z"],
+            "mois": MOIS,
+        }
+        for name, data in KC_VALUES.items()
+    ]
+    systems = [
+        {"id": k, "label": k, "efficiency": v["efficiency"], "emoji": v["emoji"]}
+        for k, v in IRRIGATION_SYSTEMS.items()
+    ]
+    return jsonify({"crops": crops, "irrigation_systems": systems, "mois": MOIS})
+
+
+@api_bp.route("/agrismart/soil-types")
+def agrismart_soil_types():
+    """5 types de sol avec propriétés hydrauliques ROSETTA v3."""
+    from app.agrismart.soil import SOIL_PROFILES
+    types = [
+        {
+            "id": k.lower().replace(" ", "_").replace("-", "_"),
+            "name": k,
+            "emoji": v["emoji"],
+            "desc": v["desc"],
+            "RU": v["RU"],
+            "RFU": v["RFU"],
+            "fc_pct": v["fc_pct"],
+            "wp_pct": v["wp_pct"],
+            "clay_pct": v["clay_pct"],
+            "sand_pct": v["sand_pct"],
+            "silt_pct": v["silt_pct"],
+        }
+        for k, v in SOIL_PROFILES.items()
+    ]
+    return jsonify({"soil_types": types})
+
+
+@api_bp.route("/agrismart/calculate", methods=["POST"])
+def agrismart_calculate():
+    """
+    Calcul complet des besoins en irrigation FAO-56.
+
+    Body JSON:
+      crop        : str  — nom de la culture
+      soil_type   : str  — texture du sol
+      system      : str  — système d'irrigation
+      area_ha     : float — superficie (ha)
+      lat         : float (optionnel) — si fourni, NASA POWER réel
+      lon         : float (optionnel) — si fourni, NASA POWER réel
+      region      : str  (optionnel) — région Togo fallback
+    """
+    try:
+        from app.agrismart.kc_values import KC_VALUES, IRRIGATION_SYSTEMS
+        from app.agrismart.soil import SOIL_PROFILES
+        from app.agrismart.climate_normals import get_nasa_climatology, get_region_climatology
+        from app.agrismart.irrigation import compute_monthly_needs, compute_kpis
+
+        body = request.get_json(force=True, silent=True) or {}
+
+        crop_name   = body.get("crop", "Tomate")
+        soil_name   = body.get("soil_type", "Limoneux")
+        system_name = body.get("system", "Goutte à goutte")
+        area_ha     = float(body.get("area_ha", 1.0))
+        lat         = body.get("lat")
+        lon         = body.get("lon")
+        region      = body.get("region")
+
+        # Validation
+        if crop_name not in KC_VALUES:
+            return jsonify({"error": f"Culture inconnue: {crop_name}"}), 400
+        if soil_name not in SOIL_PROFILES:
+            return jsonify({"error": f"Sol inconnu: {soil_name}"}), 400
+        if system_name not in IRRIGATION_SYSTEMS:
+            return jsonify({"error": f"Système inconnu: {system_name}"}), 400
+
+        # Données climatiques
+        if lat is not None and lon is not None:
+            climate = get_nasa_climatology(float(lat), float(lon))
+        elif region:
+            climate = get_region_climatology(region)
+        else:
+            climate = get_region_climatology("Centrale")
+
+        soil_ru = SOIL_PROFILES[soil_name]["RU"]
+        rows = compute_monthly_needs(crop_name, area_ha, soil_ru, system_name, climate)
+        kpis = compute_kpis(rows, area_ha, system_name)
+
+        return jsonify({
+            "crop":        crop_name,
+            "soil":        soil_name,
+            "system":      system_name,
+            "area_ha":     area_ha,
+            "climate_source": climate["source"],
+            "avg_temp":    climate.get("avg_temp"),
+            "total_precip": climate.get("total_precip"),
+            "monthly":     rows,
+            "kpis":        kpis,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 # ─── Agent Chat Endpoint (multi-agent Decision Intelligence Engine) ────
 
 @api_bp.route("/agent/chat", methods=["POST"])
