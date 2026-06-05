@@ -157,16 +157,19 @@ def agrismart_soil_types():
 @api_bp.route("/agrismart/calculate", methods=["POST"])
 def agrismart_calculate():
     """
-    Calcul complet des besoins en irrigation FAO-56.
+    Calcul complet des besoins en irrigation FAO-56 — multi-culture.
 
     Body JSON:
-      crop        : str  — nom de la culture
-      soil_type   : str  — texture du sol
-      system      : str  — système d'irrigation
-      area_ha     : float — superficie (ha)
-      lat         : float (optionnel) — si fourni, NASA POWER réel
-      lon         : float (optionnel) — si fourni, NASA POWER réel
-      region      : str  (optionnel) — région Togo fallback
+      crops       : list[{name: str, area_m2: float}]  — cultures + surfaces en m²
+      soil_type   : str   — texture du sol (partagée par toutes les cultures)
+      system      : str   — système d'irrigation
+      lat         : float (optionnel) — GPS → NASA POWER climatologie exacte
+      lon         : float (optionnel)
+      region      : str   (optionnel) — région Togo fallback
+
+    Retourne :
+      results[]   : par culture → monthly (12 mois) + kpis + boost rendement
+      combined    : totaux agrégés toutes cultures confondues
     """
     try:
         from app.agrismart.kc_values import KC_VALUES, IRRIGATION_SYSTEMS
@@ -176,23 +179,23 @@ def agrismart_calculate():
 
         body = request.get_json(force=True, silent=True) or {}
 
-        crop_name   = body.get("crop", "Tomate")
+        crops_input = body.get("crops", [{"name": "Tomate", "area_m2": 1000}])
         soil_name   = body.get("soil_type", "Limoneux")
         system_name = body.get("system", "Goutte à goutte")
-        area_ha     = float(body.get("area_ha", 1.0))
         lat         = body.get("lat")
         lon         = body.get("lon")
         region      = body.get("region")
 
-        # Validation
-        if crop_name not in KC_VALUES:
-            return jsonify({"error": f"Culture inconnue: {crop_name}"}), 400
+        # Validations
         if soil_name not in SOIL_PROFILES:
             return jsonify({"error": f"Sol inconnu: {soil_name}"}), 400
         if system_name not in IRRIGATION_SYSTEMS:
             return jsonify({"error": f"Système inconnu: {system_name}"}), 400
+        for c in crops_input:
+            if c["name"] not in KC_VALUES:
+                return jsonify({"error": f"Culture inconnue: {c['name']}"}), 400
 
-        # Données climatiques
+        # Données climatiques (une seule requête pour toutes les cultures)
         if lat is not None and lon is not None:
             climate = get_nasa_climatology(float(lat), float(lon))
         elif region:
@@ -201,19 +204,58 @@ def agrismart_calculate():
             climate = get_region_climatology("Centrale")
 
         soil_ru = SOIL_PROFILES[soil_name]["RU"]
-        rows = compute_monthly_needs(crop_name, area_ha, soil_ru, system_name, climate)
-        kpis = compute_kpis(rows, area_ha, system_name)
+
+        # Calcul par culture
+        results = []
+        for c in crops_input:
+            crop_name = c["name"]
+            area_m2   = max(float(c.get("area_m2", 1000)), 1.0)
+            monthly   = compute_monthly_needs(crop_name, area_m2, soil_ru, system_name, climate)
+            kpis      = compute_kpis(monthly, area_m2, system_name, crop_name)
+            results.append({
+                "crop":    crop_name,
+                "area_m2": area_m2,
+                "monthly": monthly,
+                "kpis":    kpis,
+            })
+
+        # Agrégation combinée (12 mois, toutes cultures)
+        from app.agrismart.kc_values import MOIS
+        combined_monthly = []
+        for i, mois in enumerate(MOIS):
+            vol_total     = sum(r["monthly"][i]["volume_total"]    for r in results)
+            boost_total   = sum(r["monthly"][i]["boost_vol_total"] for r in results)
+            combined_monthly.append({
+                "mois":            mois,
+                "volume_total":    round(vol_total, 2),
+                "boost_vol_total": round(boost_total, 2),
+                "optimal_total":   round(vol_total + boost_total, 2),
+            })
+
+        total_area_m2    = sum(c.get("area_m2", 1000) for c in crops_input)
+        total_survival   = sum(r["kpis"]["total_m3"]        for r in results)
+        total_boost      = sum(r["kpis"]["total_boost_m3"]  for r in results)
+        total_optimal    = sum(r["kpis"]["total_optimal_m3"] for r in results)
+        pic_m            = max(combined_monthly, key=lambda m: m["optimal_total"])
+        debit_pompe      = (pic_m["optimal_total"] / 30 / 12) * 0.277
 
         return jsonify({
-            "crop":        crop_name,
-            "soil":        soil_name,
-            "system":      system_name,
-            "area_ha":     area_ha,
-            "climate_source": climate["source"],
-            "avg_temp":    climate.get("avg_temp"),
-            "total_precip": climate.get("total_precip"),
-            "monthly":     rows,
-            "kpis":        kpis,
+            "soil":             soil_name,
+            "system":           system_name,
+            "climate_source":   climate["source"],
+            "avg_temp":         climate.get("avg_temp"),
+            "total_precip":     climate.get("total_precip"),
+            "results":          results,
+            "combined_monthly": combined_monthly,
+            "combined_kpis": {
+                "total_area_m2":      total_area_m2,
+                "total_survival_m3":  round(total_survival, 1),
+                "total_boost_m3":     round(total_boost, 1),
+                "total_optimal_m3":   round(total_optimal, 1),
+                "pic_mois":           pic_m["mois"],
+                "pic_optimal_m3":     round(pic_m["optimal_total"], 1),
+                "debit_pompe_ls":     round(debit_pompe, 3),
+            },
         })
 
     except Exception as e:
