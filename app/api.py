@@ -349,3 +349,31 @@ def agent_chat():
             "type": type(e).__name__,
             "agentscope_available": _AGENTSCOPE_AVAILABLE,
         }), 500
+
+
+# ── Haroo Platform Integration ────────────────────────────────────────────────
+
+@api_bp.route("/haroo/verify/<card_number>")
+def haroo_verify(card_number: str):
+    """
+    GET /api/v1/haroo/verify/<card_number>
+
+    Vérifie une carte professionnelle Haroo (OUVRIER / ACHETEUR / AGRONOME).
+    Proxy vers l'API Haroo avec enrichissement contextuel.
+    Appelé par FaîtiereHub quand une carte n'est pas trouvée dans Supabase.
+    """
+    from app.haroo.client import verify_card
+
+    result = verify_card(card_number)
+
+    if result is None:
+        return jsonify({
+            "valid": False,
+            "error": "Service Haroo non disponible",
+            "source": "haroo",
+        }), 503
+
+    # Inject source so FaîtiereHub renders the right UI
+    result["source"] = "haroo"
+    status_code = 200 if result.get("valid") else 200  # always 200, valid flag carries truth
+    return jsonify(result), status_code
