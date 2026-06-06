@@ -359,21 +359,12 @@ def haroo_verify(card_number: str):
     GET /api/v1/haroo/verify/<card_number>
 
     Vérifie une carte professionnelle Haroo (OUVRIER / ACHETEUR / AGRONOME).
-    Proxy vers l'API Haroo avec enrichissement contextuel.
-    Appelé par FaîtiereHub quand une carte n'est pas trouvée dans Supabase.
+    Requête directe sur la DB PostgreSQL Haroo (Neon) — pas de dépendance HTTP.
+    Appelé par FaîtiereHub quand une carte n'est pas trouvée dans Supabase FaîtiereHub.
+
+    Requiert HAROO_DATABASE_URL en variable d'environnement.
     """
-    from app.haroo.client import verify_card
+    from app.haroo.verify import verify_card
 
     result = verify_card(card_number)
-
-    if result is None:
-        return jsonify({
-            "valid": False,
-            "error": "Service Haroo non disponible",
-            "source": "haroo",
-        }), 503
-
-    # Inject source so FaîtiereHub renders the right UI
-    result["source"] = "haroo"
-    status_code = 200 if result.get("valid") else 200  # always 200, valid flag carries truth
-    return jsonify(result), status_code
+    return jsonify(result), 200
