@@ -359,10 +359,8 @@ def haroo_verify(card_number: str):
     GET /api/v1/haroo/verify/<card_number>
 
     Vérifie une carte professionnelle Haroo (OUVRIER / ACHETEUR / AGRONOME).
-    Requête directe sur la DB PostgreSQL Haroo (Neon) — pas de dépendance HTTP.
-    Appelé par FaîtiereHub quand une carte n'est pas trouvée dans Supabase FaîtiereHub.
-
-    Requiert HAROO_DATABASE_URL en variable d'environnement.
+    Lit les profils depuis la Supabase FaîtiereHub (base de données partagée).
+    Appelé par FaîtiereHub quand une carte n'est pas trouvée dans member_cards FAITIERE.
     """
     from app.haroo.verify import verify_card
 
