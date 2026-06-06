@@ -1,45 +1,19 @@
 """
-Connexion directe à la base de données PostgreSQL de Haroo (Neon).
-Utilise psycopg2-binary — aucune dépendance Django.
+Connexion Haroo via le client Supabase partagé de FaîtiereHub.
 
-Variable d'env requise :
-  HAROO_DATABASE_URL  postgresql://user:pwd@host/db?sslmode=require
+Variables d'env requises (mêmes que le reste d'AgriTogo) :
+  SUPABASE_URL         — https://xxxx.supabase.co
+  SUPABASE_SERVICE_KEY — service_role key
 """
 
-import os
-from functools import lru_cache
-from contextlib import contextmanager
-
-try:
-    import psycopg2
-    import psycopg2.extras
-    _PSYCOPG2_AVAILABLE = True
-except ImportError:
-    _PSYCOPG2_AVAILABLE = False
+from app.database import _get_client
 
 
-@lru_cache(maxsize=1)
-def _dsn() -> str:
-    url = os.environ.get("HAROO_DATABASE_URL", "")
-    if not url:
-        raise RuntimeError("HAROO_DATABASE_URL non configuré")
-    return url
-
-
-@contextmanager
-def get_cursor():
-    """Context manager — yields a DictCursor, commits/closes on exit."""
-    if not _PSYCOPG2_AVAILABLE:
-        raise RuntimeError("psycopg2-binary non installé (pip install psycopg2-binary)")
-    conn = psycopg2.connect(_dsn())
-    try:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            yield cur
-        conn.commit()
-    finally:
-        conn.close()
+def get_client():
+    return _get_client()
 
 
 def is_available() -> bool:
-    """Retourne True si la DB Haroo est configurée et psycopg2 installé."""
-    return _PSYCOPG2_AVAILABLE and bool(os.environ.get("HAROO_DATABASE_URL", ""))
+    """Retourne True si le client Supabase est configuré."""
+    import os
+    return bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_KEY"))
