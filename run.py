@@ -11,7 +11,7 @@ cmd = [
     "--bind", f"0.0.0.0:{port}",
     "--workers", "2",
     "--worker-class", "sync",
-    "--timeout", "120",
+    "--timeout", "300",
     "--log-level", "info",
     "--access-logfile", "-",
     "--error-logfile", "-",
