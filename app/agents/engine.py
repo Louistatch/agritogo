@@ -7,8 +7,8 @@ from datetime import datetime
 # Lazy imports to avoid crash at startup if agentscope is not yet installed
 try:
     from agentscope.agent import ReActAgent
-    from agentscope.model import GeminiChatModel, DashScopeChatModel
-    from agentscope.formatter import GeminiChatFormatter, DashScopeChatFormatter
+    from agentscope.model import OpenAIChatModel
+    from agentscope.formatter import DeepSeekChatFormatter
     from agentscope.memory import InMemoryMemory
     from agentscope.tool import Toolkit
     from agentscope.message import Msg
@@ -29,8 +29,6 @@ from app.ml_tools import (
     predire_rendement_cultures, prevoir_volatilite,
     evaluer_risque_financier, segmenter_agriculteurs, obtenir_kpi_agriculture,
     consulter_meteo_region, rafraichir_donnees_climat,
-    evaluer_risque_financier, segmenter_agriculteurs,
-    obtenir_kpi_agriculture,
 )
 from app.kobo_tools import (
     consulter_donnees_terrain, analyser_collecte_terrain,
@@ -41,6 +39,7 @@ from app.kobo_tools import (
 _agents = {}
 _memory_store = []  # Simple feedback memory
 
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 AGENT_CONFIGS = {
     "coordinator": {"prompt": COORDINATOR_PROMPT, "tools": "all"},
@@ -86,10 +85,26 @@ def _build_toolkit(tool_set="all"):
     return toolkit
 
 
-def _create_model(model_choice="gemini"):
+def _create_model(model_choice="deepseek"):
     if not _AGENTSCOPE_AVAILABLE:
         raise RuntimeError("AgentScope not available")
+
+    if model_choice == "deepseek":
+        from app.key_rotation import get_deepseek_key
+        model_name = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+        return (
+            OpenAIChatModel(
+                model_name=model_name,
+                api_key=get_deepseek_key(),
+                client_kwargs={"base_url": DEEPSEEK_BASE_URL},
+                stream=False,
+            ),
+            DeepSeekChatFormatter(),
+        )
+
     if model_choice == "qwen":
+        from agentscope.model import DashScopeChatModel
+        from agentscope.formatter import DashScopeChatFormatter
         return (
             DashScopeChatModel(
                 model_name="qwen-max",
@@ -98,6 +113,10 @@ def _create_model(model_choice="gemini"):
             ),
             DashScopeChatFormatter(),
         )
+
+    # Gemini kept only as last-resort fallback (vision/audio models not available here)
+    from agentscope.model import GeminiChatModel
+    from agentscope.formatter import GeminiChatFormatter
     from app.key_rotation import get_gemini_key
     return (
         GeminiChatModel(
@@ -130,7 +149,7 @@ def _get_agent(agent_type: str, model_choice: str = None):
 
 
 async def _call_agent(agent_type: str, question: str, model: str = None) -> str:
-    """Call a single specialized agent with automatic fallback."""
+    """Call a single specialized agent with automatic key rotation on 429."""
     chosen_model = model or select_model(agent_type)
     try:
         agent = _get_agent(agent_type, chosen_model)
@@ -139,64 +158,52 @@ async def _call_agent(agent_type: str, question: str, model: str = None) -> str:
         return response.get_text_content()
     except Exception as e:
         err = str(e).lower()
-        # Auto-fallback: if Gemini rate-limited, rotate key then switch to Qwen
         if "429" in err or "quota" in err or "rate" in err or "resource_exhausted" in err:
-            # Mark current key as exhausted (60s cooldown)
-            from app.key_rotation import mark_key_exhausted
-            mark_key_exhausted()
-            # Try rotating Gemini key first
-            if chosen_model == "gemini":
-                from app.key_rotation import rotate_gemini_key, get_all_keys_count
-                for _ in range(get_all_keys_count() - 1):
-                    new_key = rotate_gemini_key()
+            if chosen_model == "deepseek":
+                from app.key_rotation import (
+                    mark_deepseek_key_exhausted, rotate_deepseek_key,
+                    get_deepseek_keys_count,
+                )
+                mark_deepseek_key_exhausted()
+                for _ in range(get_deepseek_keys_count() - 1):
+                    rotate_deepseek_key()
                     try:
-                        # Clear cached agent for this type to use new key
-                        new_key = rotate_gemini_key()
-                        _agents.pop(f"{agent_type}_gemini", None)
-                        agent = _get_agent(agent_type, "gemini")
+                        _agents.pop(f"{agent_type}_deepseek", None)
+                        agent = _get_agent(agent_type, "deepseek")
                         msg = Msg(name="user", role="user", content=question)
                         response = await agent(msg)
-                        return f"[🔄 Clé Gemini rotée] " + response.get_text_content()
+                        return "[🔄 Clé DeepSeek rotée] " + response.get_text_content()
                     except Exception:
                         continue
-            fallback = "gemini"  # Only Gemini with key rotation
-            try:
-                agent = _get_agent(agent_type, fallback)
-                msg = Msg(name="user", role="user", content=question)
-                response = await agent(msg)
-                return f"[Fallback → {fallback.upper()}] " + response.get_text_content()
-            except Exception as e2:
-                return f"⚠️ Les deux modèles sont indisponibles. Gemini: quota épuisé. Qwen: {e2}"
+            return f"⚠️ Service temporairement indisponible (quota atteint). Réessayez dans 60 secondes."
         raise
 
 
 async def _debate(question: str) -> dict:
-    """Multi-model debate: Gemini proposes, second opinion critiques, Coordinator arbitrates."""
-    # Step 1: Gemini proposes strategy
-    gemini_response = await _call_agent("decision", question, "gemini")
+    """Multi-model debate: DeepSeek proposes, risk agent critiques, Coordinator arbitrates."""
+    # Step 1: DeepSeek decision agent proposes strategy
+    proposal = await _call_agent("decision", question, "deepseek")
 
-    # Step 2: Critique with quantitative analysis (Qwen if available, else Gemini risk agent)
+    # Step 2: DeepSeek risk agent critiques with quantitative analysis
     critique_q = (
         f"Voici une recommandation stratégique. Critique-la avec des données "
-        f"quantitatives et identifie les failles:\n\n{gemini_response}\n\n"
+        f"quantitatives et identifie les failles:\n\n{proposal}\n\n"
         f"Question originale: {question}"
     )
-    # Use Qwen only if DASHSCOPE_API_KEY is set, otherwise use Gemini risk agent
-    critique_model = "qwen" if os.environ.get("DASHSCOPE_API_KEY", "").strip() else "gemini"
-    qwen_response = await _call_agent("risk_volatility", critique_q, critique_model)
+    critique = await _call_agent("risk_volatility", critique_q, "deepseek")
 
     # Step 3: Coordinator arbitrates
     arbitration_q = (
-        f"DÉBAT MULTI-MODÈLE:\n\n"
-        f"📌 PROPOSITION (Gemini):\n{gemini_response}\n\n"
-        f"📌 CRITIQUE (Qwen):\n{qwen_response}\n\n"
+        f"DÉBAT MULTI-AGENT:\n\n"
+        f"📌 PROPOSITION:\n{proposal}\n\n"
+        f"📌 CRITIQUE QUANTITATIVE:\n{critique}\n\n"
         f"Arbitre ce débat. Donne la décision finale avec confiance et justification."
     )
-    final = await _call_agent("coordinator", arbitration_q, "gemini")
+    final = await _call_agent("coordinator", arbitration_q, "deepseek")
 
     return {
-        "proposal": gemini_response,
-        "critique": qwen_response,
+        "proposal": proposal,
+        "critique": critique,
         "final_decision": final,
         "debate_used": True,
     }
@@ -230,10 +237,9 @@ async def process_query(question: str, audience: str = "farmer") -> dict:
             raw_response = await _call_agent(agent_type, question, model)
             result["response"] = raw_response
 
-        # ── Detect model errors BEFORE passing to UX agent ──
+        # Detect model errors BEFORE passing to UX agent
         if raw_response and ("⚠️" in raw_response or "indisponible" in raw_response
-                            or "quota" in raw_response.lower() or "RESOURCE_EXHAUSTED" in raw_response):
-            # Model failed — return clean error, do NOT pass garbage to UX agent
+                            or "quota" in raw_response.lower()):
             result["error"] = raw_response
             result["formatted_response"] = (
                 "🔧 Le service est temporairement surchargé. "
@@ -241,16 +247,12 @@ async def process_query(question: str, audience: str = "farmer") -> dict:
                 "Si le problème persiste, contactez votre coopérative."
             )
         elif agent_type != "ux_agent" and audience in ("farmer", "cooperative"):
-            # Normal response — format for audience
-            ux_q = (
-                f"Reformule pour un {audience} togolais:\n\n{raw_response}"
-            )
+            ux_q = f"Reformule pour un {audience} togolais:\n\n{raw_response}"
             try:
                 result["formatted_response"] = await _call_agent(
-                    "ux_agent", ux_q, "gemini"
+                    "ux_agent", ux_q, "deepseek"
                 )
             except Exception:
-                # UX agent also failed — return raw response (still better than error)
                 result["formatted_response"] = raw_response
         else:
             result["formatted_response"] = raw_response
@@ -264,9 +266,8 @@ async def process_query(question: str, audience: str = "farmer") -> dict:
                 "Réessayez dans 30 secondes."
             )
         else:
-            result["formatted_response"] = f"⚠️ Une erreur est survenue. Réessayez dans un instant."
+            result["formatted_response"] = "⚠️ Une erreur est survenue. Réessayez dans un instant."
 
-    # Store in memory for feedback loop
     _memory_store.append(result)
     return result
 

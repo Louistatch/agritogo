@@ -66,5 +66,5 @@ def select_model(agent_type: str) -> str:
     Returns:
         "gemini" ou "qwen".
     """
-    # All agents use Gemini (Qwen disabled until activated)
-    return "gemini"
+    # All agents use DeepSeek (Qwen disabled until activated)
+    return "deepseek"
