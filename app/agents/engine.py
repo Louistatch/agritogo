@@ -1,7 +1,6 @@
 """Decision Intelligence Engine — Moteur central multi-agents AgriTogo."""
 
 import os
-import asyncio
 from datetime import datetime
 
 # Lazy imports to avoid crash at startup if agentscope is not yet installed
@@ -35,9 +34,9 @@ from app.kobo_tools import (
     generer_formulaire_prix, generer_formulaire_agriculteur,
 )
 
-# Agent registry
+# Agent registry  (key: "{agent_type}_{model_name}")
 _agents = {}
-_memory_store = []  # Simple feedback memory
+_memory_store = []
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
@@ -52,7 +51,6 @@ AGENT_CONFIGS = {
 
 
 def _build_toolkit(tool_set="all"):
-    """Build toolkit based on agent specialization."""
     if not _AGENTSCOPE_AVAILABLE:
         return None
     toolkit = Toolkit()
@@ -76,7 +74,6 @@ def _build_toolkit(tool_set="all"):
         tools.extend(risk_tools)
     if tool_set in ("all", "market"):
         tools.extend(kobo_tools)
-    # Deduplicate
     seen = set()
     for t in tools:
         if t.__name__ not in seen:
@@ -85,13 +82,19 @@ def _build_toolkit(tool_set="all"):
     return toolkit
 
 
-def _create_model(model_choice="deepseek"):
+def _create_model(model_name: str):
+    """Create an AgentScope model from a model name string.
+
+    Supported prefixes:
+      deepseek-*  → OpenAIChatModel via api.deepseek.com
+      qwen-*      → DashScopeChatModel
+      gemini-*    → GeminiChatModel (fallback for vision/audio only)
+    """
     if not _AGENTSCOPE_AVAILABLE:
         raise RuntimeError("AgentScope not available")
 
-    if model_choice == "deepseek":
+    if model_name.startswith("deepseek-"):
         from app.key_rotation import get_deepseek_key
-        model_name = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
         return (
             OpenAIChatModel(
                 model_name=model_name,
@@ -102,25 +105,25 @@ def _create_model(model_choice="deepseek"):
             DeepSeekChatFormatter(),
         )
 
-    if model_choice == "qwen":
+    if model_name.startswith("qwen-"):
         from agentscope.model import DashScopeChatModel
         from agentscope.formatter import DashScopeChatFormatter
         return (
             DashScopeChatModel(
-                model_name="qwen-max",
+                model_name=model_name,
                 api_key=os.environ.get("DASHSCOPE_API_KEY", ""),
                 stream=False,
             ),
             DashScopeChatFormatter(),
         )
 
-    # Gemini kept only as last-resort fallback (vision/audio models not available here)
+    # gemini-* kept as last-resort (vision/audio)
     from agentscope.model import GeminiChatModel
     from agentscope.formatter import GeminiChatFormatter
     from app.key_rotation import get_gemini_key
     return (
         GeminiChatModel(
-            model_name="gemini-2.5-flash",
+            model_name=model_name,
             api_key=get_gemini_key(),
             stream=False,
         ),
@@ -128,15 +131,15 @@ def _create_model(model_choice="deepseek"):
     )
 
 
-def _get_agent(agent_type: str, model_choice: str = None):
-    """Get or create a specialized agent."""
-    if model_choice is None:
-        model_choice = select_model(agent_type)
+def _get_agent(agent_type: str, model_name: str = None):
+    """Get or create a specialized agent for the given model."""
+    if model_name is None:
+        model_name = select_model(agent_type)
 
-    key = f"{agent_type}_{model_choice}"
+    key = f"{agent_type}_{model_name}"
     if key not in _agents:
         config = AGENT_CONFIGS.get(agent_type, AGENT_CONFIGS["coordinator"])
-        model, formatter = _create_model(model_choice)
+        model, formatter = _create_model(model_name)
         _agents[key] = ReActAgent(
             name=f"AgriTogo-{agent_type}",
             sys_prompt=config["prompt"],
@@ -148,18 +151,18 @@ def _get_agent(agent_type: str, model_choice: str = None):
     return _agents[key]
 
 
-async def _call_agent(agent_type: str, question: str, model: str = None) -> str:
-    """Call a single specialized agent with automatic key rotation on 429."""
-    chosen_model = model or select_model(agent_type)
+async def _call_agent(agent_type: str, question: str, model_name: str = None) -> str:
+    """Call a specialized agent; rotates DeepSeek keys automatically on 429."""
+    chosen = model_name or select_model(agent_type)
     try:
-        agent = _get_agent(agent_type, chosen_model)
+        agent = _get_agent(agent_type, chosen)
         msg = Msg(name="user", role="user", content=question)
         response = await agent(msg)
         return response.get_text_content()
     except Exception as e:
         err = str(e).lower()
         if "429" in err or "quota" in err or "rate" in err or "resource_exhausted" in err:
-            if chosen_model == "deepseek":
+            if chosen.startswith("deepseek-"):
                 from app.key_rotation import (
                     mark_deepseek_key_exhausted, rotate_deepseek_key,
                     get_deepseek_keys_count,
@@ -168,38 +171,41 @@ async def _call_agent(agent_type: str, question: str, model: str = None) -> str:
                 for _ in range(get_deepseek_keys_count() - 1):
                     rotate_deepseek_key()
                     try:
-                        _agents.pop(f"{agent_type}_deepseek", None)
-                        agent = _get_agent(agent_type, "deepseek")
+                        _agents.pop(f"{agent_type}_{chosen}", None)
+                        agent = _get_agent(agent_type, chosen)
                         msg = Msg(name="user", role="user", content=question)
                         response = await agent(msg)
                         return "[🔄 Clé DeepSeek rotée] " + response.get_text_content()
                     except Exception:
                         continue
-            return f"⚠️ Service temporairement indisponible (quota atteint). Réessayez dans 60 secondes."
+            return "⚠️ Service temporairement indisponible (quota atteint). Réessayez dans 60 secondes."
         raise
 
 
 async def _debate(question: str) -> dict:
-    """Multi-model debate: DeepSeek proposes, risk agent critiques, Coordinator arbitrates."""
-    # Step 1: DeepSeek decision agent proposes strategy
-    proposal = await _call_agent("decision", question, "deepseek")
+    """Multi-agent debate on high-stakes queries.
 
-    # Step 2: DeepSeek risk agent critiques with quantitative analysis
+    All three rounds use deepseek-reasoner for maximum precision.
+    """
+    # Step 1: decision agent proposes strategy
+    proposal = await _call_agent("decision", question, "deepseek-reasoner")
+
+    # Step 2: risk agent critiques with quantitative analysis
     critique_q = (
         f"Voici une recommandation stratégique. Critique-la avec des données "
         f"quantitatives et identifie les failles:\n\n{proposal}\n\n"
         f"Question originale: {question}"
     )
-    critique = await _call_agent("risk_volatility", critique_q, "deepseek")
+    critique = await _call_agent("risk_volatility", critique_q, "deepseek-reasoner")
 
-    # Step 3: Coordinator arbitrates
+    # Step 3: coordinator arbitrates
     arbitration_q = (
         f"DÉBAT MULTI-AGENT:\n\n"
         f"📌 PROPOSITION:\n{proposal}\n\n"
         f"📌 CRITIQUE QUANTITATIVE:\n{critique}\n\n"
         f"Arbitre ce débat. Donne la décision finale avec confiance et justification."
     )
-    final = await _call_agent("coordinator", arbitration_q, "deepseek")
+    final = await _call_agent("coordinator", arbitration_q, "deepseek-reasoner")
 
     return {
         "proposal": proposal,
@@ -210,34 +216,33 @@ async def _debate(question: str) -> dict:
 
 
 async def process_query(question: str, audience: str = "farmer") -> dict:
-    """Main entry point for the Decision Intelligence Engine.
-
-    Routes query, optionally triggers debate, formats for audience.
-    """
+    """Main entry point for the Decision Intelligence Engine."""
     timestamp = datetime.now().isoformat()
     agent_type = route_query(question)
-    model = select_model(agent_type)
+    model_name = select_model(agent_type)  # auto-selected
     debate = should_debate(question)
 
     result = {
         "timestamp": timestamp,
         "query": question,
         "agent_type": agent_type,
-        "model_used": model,
+        "model_used": model_name,
         "debate_used": debate,
         "audience": audience,
     }
 
     try:
         if debate:
+            # High-stakes: escalate all rounds to deepseek-reasoner
             debate_result = await _debate(question)
             result.update(debate_result)
+            result["model_used"] = "deepseek-reasoner"
             raw_response = debate_result["final_decision"]
         else:
-            raw_response = await _call_agent(agent_type, question, model)
+            raw_response = await _call_agent(agent_type, question, model_name)
             result["response"] = raw_response
 
-        # Detect model errors BEFORE passing to UX agent
+        # Detect model errors before passing to UX agent
         if raw_response and ("⚠️" in raw_response or "indisponible" in raw_response
                             or "quota" in raw_response.lower()):
             result["error"] = raw_response
@@ -249,8 +254,9 @@ async def process_query(question: str, audience: str = "farmer") -> dict:
         elif agent_type != "ux_agent" and audience in ("farmer", "cooperative"):
             ux_q = f"Reformule pour un {audience} togolais:\n\n{raw_response}"
             try:
+                # UX reformulation always uses fast model
                 result["formatted_response"] = await _call_agent(
-                    "ux_agent", ux_q, "deepseek"
+                    "ux_agent", ux_q, "deepseek-chat"
                 )
             except Exception:
                 result["formatted_response"] = raw_response
@@ -273,12 +279,10 @@ async def process_query(question: str, audience: str = "farmer") -> dict:
 
 
 def get_memory(limit=20):
-    """Get recent decisions from memory."""
     return _memory_store[-limit:]
 
 
 def add_feedback(index: int, outcome: str, actual_price: float = None):
-    """Add real-world feedback to a past decision."""
     if 0 <= index < len(_memory_store):
         _memory_store[index]["feedback"] = {
             "outcome": outcome,

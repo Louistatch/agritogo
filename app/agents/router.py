@@ -55,16 +55,19 @@ def should_debate(query: str) -> bool:
 
 
 def select_model(agent_type: str) -> str:
-    """Sélectionne le modèle LLM optimal pour chaque type d'agent.
+    """Auto-sélectionne le modèle DeepSeek optimal selon le type d'agent.
 
-    Gemini : raisonnement stratégique, synthèse, communication.
-    Qwen : calculs quantitatifs, modélisation statistique.
+    deepseek-chat     : rapide et économique — requêtes marché, mise en forme
+    deepseek-reasoner : lent et précis — raisonnement, prévisions, décisions
 
     Args:
         agent_type: Le type d'agent (ex: "market_intel", "quant_forecast").
 
     Returns:
-        "gemini" ou "qwen".
+        Nom de modèle DeepSeek : "deepseek-chat" ou "deepseek-reasoner".
     """
-    # All agents use DeepSeek (Qwen disabled until activated)
-    return "deepseek"
+    _reasoning_agents = {"coordinator", "quant_forecast", "risk_volatility", "decision"}
+    if agent_type in _reasoning_agents:
+        return "deepseek-reasoner"
+    # market_intel, ux_agent, unknown → chat (rapide)
+    return "deepseek-chat"
