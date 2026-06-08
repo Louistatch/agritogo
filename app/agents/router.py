@@ -68,6 +68,6 @@ def select_model(agent_type: str) -> str:
     """
     _reasoning_agents = {"coordinator", "quant_forecast", "risk_volatility", "decision"}
     if agent_type in _reasoning_agents:
-        return "deepseek-reasoner"
-    # market_intel, ux_agent, unknown → chat (rapide)
-    return "deepseek-chat"
+        return "deepseek-v4-pro"
+    # market_intel, ux_agent, unknown → flash (rapide)
+    return "deepseek-v4-flash"
