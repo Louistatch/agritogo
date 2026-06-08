@@ -27,7 +27,7 @@ def _load_from_supabase() -> pd.DataFrame:
 
     # Load members with their cooperative region
     members = sb.table("members").select(
-        "id, cooperative_id, full_name, created_at"
+        "id, cooperative_id, created_at"
     ).execute().data or []
     if not members:
         return pd.DataFrame()

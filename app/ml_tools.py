@@ -80,8 +80,12 @@ async def segmenter_agriculteurs(n_groupes: int = 4) -> ToolResponse:
     """
     result = run_farmer_segmentation(n_clusters=n_groupes)
     lines = [f"👥 {result['summary']}", ""]
-    for key, desc in result["cluster_descriptions"].items():
-        lines.append(f"  {key}: {desc}")
+    for profile in result["cluster_profiles"]:
+        lines.append(
+            f"  {profile['name']}: {profile['count']} agriculteurs "
+            f"({profile['pct']}%) — Région: {profile['top_region']} "
+            f"— Revenu moy: {profile['avg_revenue_fcfa']:,} FCFA"
+        )
     lines.append(f"\nVariance expliquée PCA: {result['explained_variance']}")
     return ToolResponse(content="\n".join(lines))
 
