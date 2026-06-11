@@ -366,3 +366,36 @@ def haroo_verify(card_number: str):
 
     result = verify_card(card_number)
     return jsonify(result), 200
+
+
+@api_bp.route("/haroo/auth/register", methods=["POST"])
+def haroo_register():
+    """
+    POST /api/v1/haroo/auth/register
+
+    Inscrit un professionnel Haroo (OUVRIER / ACHETEUR / AGRONOME) dans la
+    Supabase partagée de FaîtiereHub : compte auth.users + public.profiles
+    (rôle ouvrier/acheteur/agronome) + profil métier haroo_<type>_profiles.
+
+    Body JSON : { profile_type, email, password, first_name, last_name, phone? }
+    """
+    from app.haroo.auth import register_user
+
+    body, status = register_user(request.get_json(silent=True) or {})
+    return jsonify(body), status
+
+
+@api_bp.route("/haroo/auth/login", methods=["POST"])
+def haroo_login():
+    """
+    POST /api/v1/haroo/auth/login
+
+    Connexion d'un utilisateur Haroo (grant password GoTrue sur la Supabase
+    partagée). Retourne access_token / refresh_token + le profil métier.
+
+    Body JSON : { email, password }
+    """
+    from app.haroo.auth import login_user
+
+    body, status = login_user(request.get_json(silent=True) or {})
+    return jsonify(body), status
