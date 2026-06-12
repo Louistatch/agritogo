@@ -11,8 +11,8 @@ Tables utilisées :
   haroo_jobs                — offres d'emploi saisonnier
   haroo_presales            — préventes agricoles
   haroo_missions            — missions agronome
-  cantons                   — localités (id, nom, prefecture_id)
-  prefectures               — (id, nom, region_id)
+  cantons                   — localités (id, name, prefecture_id)
+  prefectures               — (id, name, region_id)
 """
 
 from datetime import date as _date
@@ -111,24 +111,24 @@ def _build_ouvrier(sb, card_number: str) -> dict:
     # Cantons disponibles (M2M)
     cantons_res = (
         sb.table("haroo_ouvrier_cantons")
-        .select("cantons(nom)")
+        .select("cantons(name)")
         .eq("ouvrier_id", ouvrier_id)
         .execute()
     )
-    cantons = [row["cantons"]["nom"] for row in (cantons_res.data or []) if row.get("cantons")]
+    cantons = [row["cantons"]["name"] for row in (cantons_res.data or []) if row.get("cantons")]
 
     # Offres d'emploi ouvertes dans ces cantons (max 5)
     offres = []
     if cantons:
         jobs_res = (
             sb.table("haroo_jobs")
-            .select("id, type_travail, description, canton_id, date_debut, date_fin, salaire_horaire, nombre_postes, cantons(nom)")
+            .select("id, type_travail, description, canton_id, date_debut, date_fin, salaire_horaire, nombre_postes, cantons(name)")
             .eq("statut", "OUVERTE")
             .limit(5)
             .execute()
         )
         for r in (jobs_res.data or []):
-            canton_nom = r.get("cantons", {}).get("nom") if r.get("cantons") else None
+            canton_nom = r.get("cantons", {}).get("name") if r.get("cantons") else None
             if canton_nom in cantons:
                 offres.append({
                     "id": str(r["id"]),
@@ -174,16 +174,16 @@ def _build_acheteur(sb, card_number: str) -> dict:
     # Cantons d'intervention (M2M)
     cantons_res = (
         sb.table("haroo_acheteur_cantons")
-        .select("cantons(nom)")
+        .select("cantons(name)")
         .eq("acheteur_id", acheteur_id)
         .execute()
     )
-    cantons = [row["cantons"]["nom"] for row in (cantons_res.data or []) if row.get("cantons")]
+    cantons = [row["cantons"]["name"] for row in (cantons_res.data or []) if row.get("cantons")]
 
     # Préventes disponibles (max 5)
     prev_query = (
         sb.table("haroo_presales")
-        .select("id, culture, quantite_estimee, prix_par_tonne, date_recolte_prevue, description, canton_id, cantons(nom, prefecture_id)")
+        .select("id, culture, quantite_estimee, prix_par_tonne, date_recolte_prevue, description, canton_id, cantons(name, prefecture_id)")
         .eq("statut", "DISPONIBLE")
         .order("created_at", desc=True)
         .limit(5)
@@ -205,7 +205,7 @@ def _build_acheteur(sb, card_number: str) -> dict:
             "quantite_estimee": float(r["quantite_estimee"]) if r.get("quantite_estimee") else 0,
             "prix_par_kg": float(r["prix_par_tonne"]) / 1000 if r.get("prix_par_tonne") else 0,
             "date_recolte_prevue": r.get("date_recolte_prevue"),
-            "canton": canton_info.get("nom"),
+            "canton": canton_info.get("name"),
             "description": r.get("description") or "",
         })
 
@@ -226,7 +226,7 @@ def _build_acheteur(sb, card_number: str) -> dict:
 def _build_agronome(sb, card_number: str) -> dict:
     res = (
         sb.table("haroo_agronome_profiles")
-        .select("id, first_name, last_name, phone, photo_url, specialisations, canton_id, badge_valide, statut_validation, note_moyenne, nombre_missions, cantons(nom, prefectures(nom, regions(nom)))")
+        .select("id, first_name, last_name, phone, photo_url, specialisations, canton_id, badge_valide, statut_validation, note_moyenne, nombre_missions, cantons(name, prefectures(name, regions(name)))")
         .eq("card_number", card_number)
         .limit(1)
         .execute()
@@ -271,9 +271,9 @@ def _build_agronome(sb, card_number: str) -> dict:
             "phone": ag.get("phone"),
             "photo_url": ag.get("photo_url"),
             "specialisations": ag.get("specialisations") or [],
-            "canton": canton_info.get("nom"),
-            "prefecture": prefecture_info.get("nom"),
-            "region": region_info.get("nom"),
+            "canton": canton_info.get("name"),
+            "prefecture": prefecture_info.get("name"),
+            "region": region_info.get("name"),
             "badge_valide": ag.get("badge_valide", False),
             "statut_validation": ag.get("statut_validation"),
             "note_moyenne": float(ag.get("note_moyenne") or 0),
