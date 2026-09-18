@@ -2,7 +2,12 @@
 
 from flask import Blueprint, jsonify, request
 
-from app.database import get_prix_historiques, get_produits, get_marches, get_db_stats
+from app.database import (
+    get_prix_historiques, get_produits, get_marches, get_db_stats,
+    add_produit, delete_produit, add_prix_from_csv, get_all_prix, delete_prix,
+    get_latest_prices,
+)
+from app.kobo import save_kobo_config, load_kobo_config, KoboClient
 
 api_bp = Blueprint("api_bp", __name__, url_prefix="/api/v1")
 
@@ -399,3 +404,123 @@ def haroo_login():
 
     body, status = login_user(request.get_json(silent=True) or {})
     return jsonify(body), status
+
+
+# ─── Admin JSON endpoints (called by FaîtiereHub unified admin) ────────────
+
+@api_bp.route("/cultures", methods=["POST"])
+def api_add_culture():
+    """Add an agricultural product."""
+    body = request.get_json(silent=True) or {}
+    nom = (body.get("nom") or "").strip()
+    unite = (body.get("unite") or "kg").strip()
+    categorie = (body.get("categorie") or "culture").strip()
+    if not nom:
+        return jsonify({"error": "nom requis"}), 400
+    ok = add_produit(nom, unite, categorie)
+    if ok:
+        return jsonify({"success": True, "nom": nom})
+    return jsonify({"error": f"'{nom}' existe déjà ou erreur DB"}), 409
+
+
+@api_bp.route("/cultures/<cid>", methods=["DELETE"])
+def api_delete_culture(cid):
+    """Delete a product by id."""
+    delete_produit(str(cid))
+    return jsonify({"success": True})
+
+
+@api_bp.route("/prix-latest")
+def api_prix_latest():
+    """Return the most recent price per product."""
+    return jsonify(get_latest_prices())
+
+
+@api_bp.route("/prix-list")
+def api_prix_list():
+    """Paginated price list. ?page=N"""
+    page = max(1, int(request.args.get("page", 1)))
+    return jsonify(get_all_prix(page=page))
+
+
+@api_bp.route("/prix/<pid>", methods=["DELETE"])
+def api_delete_prix(pid):
+    """Delete a price record by id."""
+    delete_prix(str(pid))
+    return jsonify({"success": True})
+
+
+@api_bp.route("/upload/prix", methods=["POST"])
+def api_upload_prix():
+    """Import prices from CSV (multipart or raw text body)."""
+    try:
+        if request.content_type and "multipart" in request.content_type:
+            f = request.files.get("file")
+            if not f:
+                return jsonify({"error": "file required"}), 400
+            csv_content = f.read().decode("utf-8")
+        else:
+            csv_content = request.data.decode("utf-8")
+        result = add_prix_from_csv(csv_content)
+        return jsonify(result if isinstance(result, dict) else {"inserted": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/kobo/config", methods=["GET"])
+def api_kobo_config_get():
+    """Return current KoboCollect config (token masked)."""
+    cfg = load_kobo_config()
+    if not cfg:
+        return jsonify({"configured": False})
+    return jsonify({"configured": True, "base_url": cfg.get("base_url"), "token_hint": cfg.get("token", "")[:6] + "…"})
+
+
+@api_bp.route("/kobo/config", methods=["POST"])
+def api_kobo_config_set():
+    """Save KoboCollect server URL + token."""
+    body = request.get_json(silent=True) or {}
+    url = (body.get("base_url") or body.get("kobo_url") or "").strip()
+    token = (body.get("token") or body.get("kobo_token") or "").strip()
+    if not url or not token:
+        return jsonify({"error": "base_url and token required"}), 400
+    save_kobo_config(url, token)
+    try:
+        client = KoboClient(url, token)
+        count = client.get_form_count()
+        return jsonify({"success": True, "forms_found": count})
+    except Exception as e:
+        return jsonify({"success": True, "warning": str(e)})
+
+
+@api_bp.route("/kobo/forms")
+def api_kobo_forms():
+    """List KoboCollect forms."""
+    cfg = load_kobo_config()
+    if not cfg:
+        return jsonify({"error": "KoboCollect non configuré"}), 503
+    try:
+        client = KoboClient(cfg["base_url"], cfg["token"])
+        forms = client.get_forms()
+        return jsonify(forms if isinstance(forms, list) else [])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@api_bp.route("/pipeline/status")
+def api_pipeline_status():
+    """Check ML data file availability and external API status."""
+    import os
+    try:
+        from app.data_pipeline import get_data_dir
+        DATA_DIR = get_data_dir()
+    except Exception:
+        DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+    files = {
+        "yield_df": os.path.exists(os.path.join(DATA_DIR, "archive1", "yield_df.csv")),
+        "Core_TimeSeries": os.path.exists(os.path.join(DATA_DIR, "Core_TimeSeries.csv")),
+        "AgriRiskFin": os.path.exists(os.path.join(DATA_DIR, "AgriRiskFin_Dataset.csv")),
+        "rainfall": os.path.exists(os.path.join(DATA_DIR, "archive1", "rainfall.csv")),
+        "temp": os.path.exists(os.path.join(DATA_DIR, "archive1", "temp.csv")),
+    }
+    return jsonify({"files": files, "ready": sum(files.values()), "total": len(files)})
