@@ -5,9 +5,16 @@ Les comptes vivent dans l'unique base Supabase partagée de FaîtiereHub
 (auth.users). Flux d'inscription :
 
   1. Création de l'utilisateur via l'API admin GoTrue (service_role).
-  2. Le trigger Supabase handle_new_user crée public.profiles (role='member').
-  3. Le rôle est promu en 'ouvrier' / 'acheteur' / 'agronome'.
+  2. Le trigger Supabase handle_new_user crée public.profiles.
+  3. profiles.haroo_type est posé à 'ouvrier' / 'acheteur' / 'agronome' ;
+     profiles.role reste tel que le trigger l'a laissé ('none').
   4. Un profil métier est créé dans haroo_<type>_profiles.
+
+Un compte porte deux couches indépendantes : profiles.role pour la couche
+organisationnelle (coopératives) et profiles.haroo_type pour la couche Haroo.
+Ce module n'écrit que la seconde. Écrire le type Haroo dans role écrasait la
+couche organisationnelle, ce qui empêchait un membre de coopérative d'être
+aussi ouvrier.
 
 La connexion est un simple grant password GoTrue : les jetons retournés sont
 les mêmes que ceux émis pour FaîtiereHub (même auth, même base).
@@ -24,7 +31,7 @@ import requests
 
 from .database import get_client, is_available
 
-# card_type carte → (table de profil, rôle public.profiles)
+# card_type carte → (table de profil, type de profil Haroo)
 PROFILE_TABLES = {
     "OUVRIER": ("haroo_ouvrier_profiles", "ouvrier"),
     "ACHETEUR": ("haroo_acheteur_profiles", "acheteur"),
@@ -124,18 +131,23 @@ def register_user(payload: dict) -> tuple[dict, int]:
     if not user_id:
         return {"success": False, "error": "Réponse auth invalide"}, 502
 
-    table, role = PROFILE_TABLES[data["profile_type"]]
+    table, haroo_type = PROFILE_TABLES[data["profile_type"]]
     sb = get_client()
 
     try:
-        # ── 2. Promouvoir le rôle (handle_new_user a créé profiles en 'member') ─
+        # ── 2. Poser la couche Haroo ────────────────────────────────────────────
+        # On n'écrit QUE haroo_type. profiles.role appartient à la couche
+        # organisationnelle et garde la valeur posée par le trigger ('none'),
+        # que bootstrap_cooperative_admin promeut le jour où ce professionnel
+        # rejoint une coopérative. Y écrire le type Haroo, comme on le faisait,
+        # écrasait cette couche : un compte ne pouvait pas être les deux.
         sb.table("profiles").upsert(
             {
                 "id": user_id,
                 "email": data["email"],
                 "first_name": data["first_name"],
                 "last_name": data["last_name"],
-                "role": role,
+                "haroo_type": haroo_type,
             },
             on_conflict="id",
         ).execute()
@@ -161,11 +173,13 @@ def register_user(payload: dict) -> tuple[dict, int]:
             pass
         return {"success": False, "error": f"Création du profil impossible: {exc}"}, 502
 
+    # Pas de clé "role" : la couche organisationnelle du compte reste 'none',
+    # l'annoncer comme valant le type Haroo induirait l'appelant en erreur.
     return {
         "success": True,
         "user_id": user_id,
         "profile_type": data["profile_type"],
-        "role": role,
+        "haroo_type": haroo_type,
     }, 201
 
 
@@ -206,13 +220,14 @@ def login_user(payload: dict) -> tuple[dict, int]:
 
     # Rôle + profil métier depuis la base partagée
     role = None
+    haroo_type = None
     profile = None
     profile_type = None
     if user_id:
         sb = get_client()
         prof_res = (
             sb.table("profiles")
-            .select("role, first_name, last_name")
+            .select("role, haroo_type, first_name, last_name")
             .eq("id", user_id)
             .limit(1)
             .execute()
@@ -220,9 +235,12 @@ def login_user(payload: dict) -> tuple[dict, int]:
         rows = prof_res.data or []
         if rows:
             role = rows[0].get("role")
+            # haroo_type fait foi ; role n'est qu'un repli pour les comptes
+            # créés avant la bascule et pas encore migrés.
+            haroo_type = rows[0].get("haroo_type") or role
 
-        for ptype, (table, table_role) in PROFILE_TABLES.items():
-            if role and role != table_role:
+        for ptype, (table, table_haroo_type) in PROFILE_TABLES.items():
+            if haroo_type and haroo_type != table_haroo_type:
                 continue
             hp_res = (
                 sb.table(table)
@@ -244,6 +262,7 @@ def login_user(payload: dict) -> tuple[dict, int]:
         "expires_in": session.get("expires_in"),
         "user_id": user_id,
         "role": role,
+        "haroo_type": haroo_type,
         "profile_type": profile_type,
         "profile": profile,
     }, 200
