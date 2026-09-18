@@ -7,6 +7,7 @@ from app.database import (
     add_produit, delete_produit, add_prix_from_csv, get_all_prix, delete_prix,
     get_latest_prices,
 )
+from .auth_guard import require_super_admin
 from app.kobo import save_kobo_config, load_kobo_config, KoboClient
 
 api_bp = Blueprint("api_bp", __name__, url_prefix="/api/v1")
@@ -409,6 +410,7 @@ def haroo_login():
 # ─── Admin JSON endpoints (called by FaîtiereHub unified admin) ────────────
 
 @api_bp.route("/cultures", methods=["POST"])
+@require_super_admin
 def api_add_culture():
     """Add an agricultural product."""
     body = request.get_json(silent=True) or {}
@@ -424,6 +426,7 @@ def api_add_culture():
 
 
 @api_bp.route("/cultures/<cid>", methods=["DELETE"])
+@require_super_admin
 def api_delete_culture(cid):
     """Delete a product by id."""
     delete_produit(str(cid))
@@ -437,6 +440,7 @@ def api_prix_latest():
 
 
 @api_bp.route("/prix-list")
+@require_super_admin
 def api_prix_list():
     """Paginated price list. ?page=N"""
     page = max(1, int(request.args.get("page", 1)))
@@ -444,6 +448,7 @@ def api_prix_list():
 
 
 @api_bp.route("/prix/<pid>", methods=["DELETE"])
+@require_super_admin
 def api_delete_prix(pid):
     """Delete a price record by id."""
     delete_prix(str(pid))
@@ -451,6 +456,7 @@ def api_delete_prix(pid):
 
 
 @api_bp.route("/upload/prix", methods=["POST"])
+@require_super_admin
 def api_upload_prix():
     """Import prices from CSV (multipart or raw text body)."""
     try:
@@ -468,6 +474,7 @@ def api_upload_prix():
 
 
 @api_bp.route("/kobo/config", methods=["GET"])
+@require_super_admin
 def api_kobo_config_get():
     """Return current KoboCollect config (token masked)."""
     cfg = load_kobo_config()
@@ -477,6 +484,7 @@ def api_kobo_config_get():
 
 
 @api_bp.route("/kobo/config", methods=["POST"])
+@require_super_admin
 def api_kobo_config_set():
     """Save KoboCollect server URL + token."""
     body = request.get_json(silent=True) or {}
@@ -494,6 +502,7 @@ def api_kobo_config_set():
 
 
 @api_bp.route("/kobo/forms")
+@require_super_admin
 def api_kobo_forms():
     """List KoboCollect forms."""
     cfg = load_kobo_config()
@@ -508,6 +517,7 @@ def api_kobo_forms():
 
 
 @api_bp.route("/pipeline/status")
+@require_super_admin
 def api_pipeline_status():
     """Check ML data file availability and external API status."""
     import os

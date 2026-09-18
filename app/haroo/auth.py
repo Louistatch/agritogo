@@ -6,14 +6,15 @@ Les comptes vivent dans l'unique base Supabase partagée de FaîtiereHub
 
   1. Création de l'utilisateur via l'API admin GoTrue (service_role).
   2. Le trigger Supabase handle_new_user crée public.profiles.
-  3. profiles.haroo_type est posé à 'ouvrier' / 'acheteur' / 'agronome'.
+  3. profiles.haroo_type est posé à 'ouvrier' / 'acheteur' / 'agronome' ;
+     profiles.role reste tel que le trigger l'a laissé ('none').
   4. Un profil métier est créé dans haroo_<type>_profiles.
 
 Un compte porte deux couches indépendantes : profiles.role pour la couche
 organisationnelle (coopératives) et profiles.haroo_type pour la couche Haroo.
-Écrire le type Haroo dans role écraserait la couche organisationnelle, ce qui
-empêchait jusqu'ici un membre de coopérative d'être aussi ouvrier. role est
-encore écrit ici le temps que le front bascule, puis cessera de l'être.
+Ce module n'écrit que la seconde. Écrire le type Haroo dans role écrasait la
+couche organisationnelle, ce qui empêchait un membre de coopérative d'être
+aussi ouvrier.
 
 La connexion est un simple grant password GoTrue : les jetons retournés sont
 les mêmes que ceux émis pour FaîtiereHub (même auth, même base).
@@ -135,18 +136,17 @@ def register_user(payload: dict) -> tuple[dict, int]:
 
     try:
         # ── 2. Poser la couche Haroo ────────────────────────────────────────────
-        # Double écriture transitoire (étape 2 du passage au compte à deux
-        # couches) : haroo_type est la nouvelle source, role reste écrit le
-        # temps que le front bascule. L'écriture de role disparaîtra à l'étape 5,
-        # pour qu'un compte puisse être à la fois membre d'une coopérative et
-        # professionnel Haroo — aujourd'hui ce role écrase la couche org.
+        # On n'écrit QUE haroo_type. profiles.role appartient à la couche
+        # organisationnelle et garde la valeur posée par le trigger ('none'),
+        # que bootstrap_cooperative_admin promeut le jour où ce professionnel
+        # rejoint une coopérative. Y écrire le type Haroo, comme on le faisait,
+        # écrasait cette couche : un compte ne pouvait pas être les deux.
         sb.table("profiles").upsert(
             {
                 "id": user_id,
                 "email": data["email"],
                 "first_name": data["first_name"],
                 "last_name": data["last_name"],
-                "role": haroo_type,
                 "haroo_type": haroo_type,
             },
             on_conflict="id",
@@ -173,11 +173,12 @@ def register_user(payload: dict) -> tuple[dict, int]:
             pass
         return {"success": False, "error": f"Création du profil impossible: {exc}"}, 502
 
+    # Pas de clé "role" : la couche organisationnelle du compte reste 'none',
+    # l'annoncer comme valant le type Haroo induirait l'appelant en erreur.
     return {
         "success": True,
         "user_id": user_id,
         "profile_type": data["profile_type"],
-        "role": haroo_type,
         "haroo_type": haroo_type,
     }, 201
 
