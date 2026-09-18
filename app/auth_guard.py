@@ -22,7 +22,9 @@ from functools import wraps
 import requests
 from flask import jsonify, request
 
-from .database import get_client
+# app/database.py expose get_db(), pas get_client() : ce dernier vit dans
+# app/haroo/database.py. Depuis ce module-ci, `.database` résout vers le premier.
+from .database import get_db
 
 
 def _bearer_token() -> str | None:
@@ -67,7 +69,7 @@ def require_super_admin(fn):
 
         try:
             res = (
-                get_client()
+                get_db()
                 .table("profiles")
                 .select("role")
                 .eq("id", user_id)
