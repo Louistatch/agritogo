@@ -1,11 +1,20 @@
 {% if data %}
-<h3>Prix de {{ produit }}</h3>
+<div class="market-card-title">
+    <div>
+        <h3>Observations · {{ produit }}</h3>
+        <p>Les prévisions AgriTogo sont exclues de ce tableau.</p>
+    </div>
+    <span class="market-badge">{{ data|length }} lignes</span>
+</div>
+<div style="overflow-x:auto">
 <table>
     <thead>
         <tr>
             <th>Date</th>
             <th>Marché</th>
-            <th>Prix (FCFA/kg)</th>
+            <th>Prix</th>
+            <th>Source</th>
+            <th>Nature</th>
         </tr>
     </thead>
     <tbody>
@@ -13,11 +22,20 @@
         <tr>
             <td>{{ row.date }}</td>
             <td>{{ row.marche }}</td>
-            <td class="prix">{{ "%.0f"|format(row.prix) }}</td>
+            <td class="prix">{{ "%.0f"|format(row.prix) }} {{ row.devise|default("FCFA") }}/{{ row.unite|default("kg") }}</td>
+            <td>
+                {% if row.source_url %}
+                <a class="source-link" href="{{ row.source_url }}" target="_blank" rel="noopener">{{ row.source }}</a>
+                {% else %}
+                {{ row.source|default("AgriTogo") }}
+                {% endif %}
+            </td>
+            <td><span class="market-badge live">Observé</span></td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
+</div>
 {% else %}
-<p class="empty">Aucune donnée trouvée pour ce produit.</p>
+<p class="empty">Aucune observation trouvée pour ce produit et ce marché.</p>
 {% endif %}

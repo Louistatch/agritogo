@@ -1,0 +1,136 @@
+/* AgriTogo Market Intelligence — focused market decision workspace */
+
+.market-shell { display:flex; flex-direction:column; gap:14px; }
+.market-hero {
+    display:grid; grid-template-columns:minmax(0, 1.15fr) minmax(360px, .85fr);
+    gap:12px;
+}
+.market-panel {
+    background:linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.008));
+    border:1px solid var(--border); border-radius:14px; padding:18px;
+}
+.market-kicker {
+    font-size:10px; text-transform:uppercase; letter-spacing:.11em;
+    color:var(--text-3); font-weight:700;
+}
+.market-title {
+    margin-top:5px; color:var(--text-0); font-size:26px; line-height:1.15;
+    letter-spacing:-.7px; font-weight:650;
+}
+.market-copy { color:var(--text-2); font-size:12px; margin-top:7px; max-width:720px; }
+.market-controls {
+    display:grid; grid-template-columns:1fr 1fr auto; gap:8px; margin-top:18px;
+}
+.market-control label {
+    display:block; font-size:9px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--text-3); margin:0 0 5px 2px; font-weight:700;
+}
+.market-control select {
+    width:100%; min-height:38px; background:var(--bg-1); color:var(--text-0);
+    border:1px solid var(--border-light); border-radius:8px; padding:0 11px;
+}
+.market-load {
+    align-self:end; min-height:38px; padding:0 16px; border-radius:8px;
+    border:1px solid var(--accent); background:var(--accent); color:#fff;
+    font-weight:650; cursor:pointer;
+}
+.market-trustbar {
+    display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; align-items:center;
+}
+.market-badge {
+    display:inline-flex; align-items:center; gap:6px; min-height:25px; padding:0 9px;
+    border:1px solid var(--border); border-radius:999px; background:var(--bg-1);
+    color:var(--text-2); font-size:10px; font-weight:600;
+}
+.market-badge strong { color:var(--text-0); font-weight:650; }
+.market-badge.live { border-color:rgba(34,197,94,.34); color:var(--green); }
+.market-price-box {
+    display:flex; flex-direction:column; min-height:100%; justify-content:space-between;
+}
+.market-price-label {
+    font-size:10px; color:var(--text-3); text-transform:uppercase;
+    letter-spacing:.08em; font-weight:700;
+}
+.market-price-value {
+    color:var(--text-0); font-family:var(--mono); font-weight:720;
+    font-size:42px; line-height:1; margin-top:10px; letter-spacing:-1.4px;
+}
+.market-price-value small { font-size:12px; color:var(--text-3); letter-spacing:0; font-weight:500; }
+.market-price-meta { display:flex; align-items:center; gap:10px; margin-top:10px; color:var(--text-2); font-size:11px; }
+.market-delta { font-family:var(--mono); font-weight:650; }
+.market-delta.up { color:var(--green); }
+.market-delta.down { color:var(--red); }
+.market-delta.flat { color:var(--text-2); }
+.market-range {
+    display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:18px;
+}
+.market-mini {
+    padding:10px; background:var(--bg-1); border:1px solid var(--border); border-radius:8px;
+}
+.market-mini span { display:block; color:var(--text-3); font-size:9px; text-transform:uppercase; letter-spacing:.06em; }
+.market-mini strong { display:block; margin-top:3px; color:var(--text-0); font-family:var(--mono); font-size:13px; }
+.market-grid { display:grid; grid-template-columns:minmax(0, 1.4fr) minmax(320px,.6fr); gap:12px; }
+.market-chart { height:300px; }
+.market-card-title {
+    display:flex; justify-content:space-between; gap:10px; align-items:flex-start;
+    margin-bottom:12px;
+}
+.market-card-title h3 { color:var(--text-0); font-size:13px; font-weight:650; margin:0; }
+.market-card-title p { color:var(--text-3); font-size:10px; margin-top:2px; }
+.market-ranking { display:flex; flex-direction:column; gap:5px; }
+.market-row {
+    display:grid; grid-template-columns:minmax(130px,1fr) 100px 84px 72px;
+    align-items:center; gap:10px; min-height:46px; padding:0 10px;
+    border:1px solid transparent; border-bottom-color:var(--border);
+    cursor:pointer; transition:.14s ease;
+}
+.market-row:hover { background:var(--bg-hover); border-color:var(--border-light); border-radius:8px; }
+.market-row .name { color:var(--text-0); font-weight:600; }
+.market-row .price { color:var(--text-0); font-family:var(--mono); text-align:right; }
+.market-row .date { color:var(--text-3); font-size:10px; text-align:right; }
+.market-rank-empty { padding:24px 8px; color:var(--text-3); text-align:center; font-size:11px; }
+.market-ai {
+    background:linear-gradient(150deg, rgba(79,140,255,.08), rgba(34,197,94,.035));
+    border:1px solid rgba(79,140,255,.25);
+}
+.market-ai-mark {
+    width:30px; height:30px; border-radius:8px; display:grid; place-items:center;
+    background:var(--accent-dim); color:var(--accent); font-family:var(--mono); font-size:12px; font-weight:700;
+}
+.market-ai h3 { margin-top:12px; color:var(--text-0); font-size:18px; letter-spacing:-.35px; }
+.market-ai p { margin-top:7px; color:var(--text-2); font-size:11px; line-height:1.65; }
+.market-actions { display:grid; gap:7px; margin-top:15px; }
+.market-action {
+    text-align:left; min-height:42px; border:1px solid var(--border-light);
+    background:rgba(10,11,15,.5); color:var(--text-1); border-radius:8px;
+    padding:0 12px; cursor:pointer; transition:.14s ease; font-family:var(--font);
+}
+.market-action:hover { border-color:var(--accent); color:var(--text-0); transform:translateY(-1px); }
+.market-action strong { display:block; font-size:11px; }
+.market-action span { display:block; color:var(--text-3); font-size:9px; margin-top:2px; }
+.market-provenance {
+    margin-top:14px; padding-top:12px; border-top:1px solid rgba(79,140,255,.16);
+    display:flex; gap:7px; flex-wrap:wrap; color:var(--text-3); font-size:9px;
+}
+.market-details summary {
+    list-style:none; cursor:pointer; color:var(--text-2); font-size:11px;
+    display:flex; justify-content:space-between; align-items:center;
+}
+.market-details summary::-webkit-details-marker { display:none; }
+.market-details[open] summary { margin-bottom:12px; }
+.source-link { color:var(--accent); text-decoration:none; }
+.source-link:hover { text-decoration:underline; }
+
+@media (max-width: 900px) {
+    .market-hero, .market-grid { grid-template-columns:1fr; }
+    .market-title { font-size:23px; }
+}
+@media (max-width: 640px) {
+    .market-panel { padding:14px; border-radius:10px; }
+    .market-controls { grid-template-columns:1fr 1fr; }
+    .market-load { grid-column:1 / -1; }
+    .market-price-value { font-size:36px; }
+    .market-chart { height:250px; }
+    .market-row { grid-template-columns:1fr 92px 70px; }
+    .market-row .date { display:none; }
+}

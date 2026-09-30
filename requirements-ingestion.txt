@@ -1,0 +1,3 @@
+# Optional dependencies for CPC/network discovery jobs.
+-r requirements.txt
+playwright==1.55.0
