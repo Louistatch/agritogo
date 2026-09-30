@@ -97,20 +97,24 @@ Charts.priceLine = function(id, apiData, produit) {
 // ── 2. SPARKLINES — ticker row ────────────────────────────
 // data: [{nom, prix, delta}]
 Charts.renderSparklines = function(prices) {
+    // Never fabricate a price path. A sparkline is rendered only when the API
+    // supplies real historical observations in p.history.
     prices.forEach(p => {
         const id = 'spark-' + p.nom.replace(/\s/g,'_');
         const el = document.getElementById(id);
         if (!el) return;
-        const vals = Array.from({length:12}, (_,i) =>
-            Math.round(p.prix * (1 + (Math.sin(i*0.8+p.prix%3)*0.05))));
+        const history = Array.isArray(p.history) ? p.history.map(Number).filter(Number.isFinite) : [];
+        if (history.length < 2) {
+            el.innerHTML = '<span style="color:'+T.t3+';font-size:9px">historique requis</span>';
+            return;
+        }
         this.ec(id, {
             backgroundColor:'transparent',
             grid:{top:0,right:0,bottom:0,left:0},
-            xAxis:{type:'category',show:false,data:vals.map((_,i)=>i)},
+            xAxis:{type:'category',show:false,data:history.map((_,i)=>i)},
             yAxis:{type:'value',show:false},
-            series:[{type:'line',data:vals,smooth:true,symbol:'none',
-                lineStyle:{color:p.delta>=0?T.green:T.red,width:1.5},
-                areaStyle:{color:p.delta>=0?T.green+'20':T.red+'20'}}],
+            series:[{type:'line',data:history,smooth:false,symbol:'none',
+                lineStyle:{color:history[history.length-1] >= history[0] ? T.green : T.red,width:1.5}}],
         });
     });
 };
