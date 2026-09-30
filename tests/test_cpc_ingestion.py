@@ -128,3 +128,29 @@ def test_same_site_accepts_subdomain() -> None:
         "https://example.com/prix",
         "cpc-togo.com",
     )
+
+
+def test_normalize_html_php_table_fragment() -> None:
+    html = """
+    <table>
+      <tr>
+        <th>Marché</th><th>Maïs</th><th>Soja</th><th>Date</th>
+      </tr>
+      <tr>
+        <td>Marché de Kara</td><td>245</td><td>310</td>
+        <td>30/09/2026</td>
+      </tr>
+    </table>
+    """
+
+    rows = normalize_payload(
+        html,
+        "text/html; charset=utf-8",
+        "https://example.org/php_files/tableau_prix.php",
+        unit_hint="kg",
+    )
+
+    assert len(rows) == 2
+    assert {row.product_raw for row in rows} == {"Maïs", "Soja"}
+    assert all(row.market_raw == "Marché de Kara" for row in rows)
+    assert all(row.observed_at == "2026-09-30" for row in rows)
