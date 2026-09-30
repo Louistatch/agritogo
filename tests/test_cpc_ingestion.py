@@ -72,3 +72,28 @@ def test_record_hash_is_idempotent() -> None:
     )
 
     assert first[0].record_hash == second[0].record_hash
+
+
+def test_wide_parser_ignores_numeric_locality_labels() -> None:
+    records = [
+        {
+            "Region": "Centre",
+            "Department": "MFOUNDI",
+            "Borough": "YAOUNDE 2EME",
+            "Locality": "Yaoundé",
+            "Walk": "Marché 8ème",
+            "Rice Paddy": "600",
+            "Steamed Local Rice": "900",
+            "Date": "04/08/2026",
+        },
+    ]
+
+    rows = normalize_records(
+        records,
+        "https://simro-cmr.com/",
+        unit_hint="kg",
+    )
+
+    products = {row.product_raw for row in rows}
+    assert products == {"Rice Paddy", "Steamed Local Rice"}
+    assert all(row.market_raw == "Marché 8ème" for row in rows)
