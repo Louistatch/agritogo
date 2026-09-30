@@ -20,7 +20,7 @@ import unicodedata
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -150,6 +150,8 @@ class EndpointCandidate:
     request_post_data: str | None = None
     sample: str = ""
     reason: list[str] = field(default_factory=list)
+    source_page: str | None = None
+    discovered_via: str = "network"
 
 
 @dataclass
@@ -161,6 +163,8 @@ class DiscoveryReport:
     candidates: list[EndpointCandidate] = field(default_factory=list)
     dom_tables: list[dict[str, Any]] = field(default_factory=list)
     resource_urls: list[str] = field(default_factory=list)
+    visited_pages: list[str] = field(default_factory=list)
+    script_endpoint_hints: list[str] = field(default_factory=list)
     unit_hint: str | None = None
     currency_hint: str = "FCFA"
 
@@ -246,17 +250,64 @@ def _score_candidate(url: str, content_type: str, text: str) -> tuple[int, list[
     return score, reasons
 
 
+
+def _same_site(candidate_url: str, root_host: str) -> bool:
+    host = urlparse(candidate_url).netloc.lower().removeprefix("www.")
+    return host == root_host or host.endswith("." + root_host)
+
+
+def _market_relevance(text: str) -> int:
+    value = _norm(text)
+    score = 0
+    for token, weight in (
+        ("sim", 3),
+        ("prix", 5),
+        ("price", 5),
+        ("marche", 5),
+        ("market", 5),
+        ("agric", 2),
+        ("produit", 2),
+        ("culture", 2),
+        ("cours", 2),
+    ):
+        if token in value:
+            score += weight
+    return score
+
+
+def _extract_script_endpoint_hints(script_text: str, base_url: str) -> list[str]:
+    """Extract likely public data endpoints embedded in front-end JavaScript."""
+    if not script_text:
+        return []
+
+    patterns = [
+        r"""fetch\s*\(\s*["']([^"']+)["']""",
+        r"""axios\.(?:get|post|request)\s*\(\s*["']([^"']+)["']""",
+        r"""\$\.(?:get|getJSON|post)\s*\(\s*["']([^"']+)["']""",
+        r"""url\s*:\s*["']([^"']+)["']""",
+        r"""["']([^"']*(?:/api/|/ajax/|prix|price|marche|market)[^"']*)["']""",
+    ]
+    found: list[str] = []
+    for pattern in patterns:
+        for match in re.findall(pattern, script_text, re.I):
+            value = str(match).strip()
+            if not value or value.startswith(("data:", "javascript:", "#")):
+                continue
+            if ("$" + "{") in value or "{{" in value:
+                continue
+            absolute = urljoin(base_url, value)
+            parsed = urlparse(absolute)
+            if parsed.scheme in {"http", "https"}:
+                found.append(absolute)
+    return list(dict.fromkeys(found))
+
+
 async def discover_cpc_source(
     url: str = "https://www.cpc-togo.com/",
     browser_ws_endpoint: str | None = None,
     settle_seconds: float = 6.0,
 ) -> DiscoveryReport:
-    """Discover the page's real market-data sources through browser network traffic.
-
-    If browser_ws_endpoint is provided, Playwright connects to that remote CDP
-    browser (Browserbase/Browserless compatible). Otherwise it launches local
-    Chromium. Only response metadata and small public payload samples are saved.
-    """
+    """Discover CPC sources using network traffic, scripts and safe UI probes."""
     try:
         from playwright.async_api import async_playwright
     except ImportError as exc:
@@ -268,8 +319,13 @@ async def discover_cpc_source(
     parsed = urlparse(url)
     host = parsed.netloc.lower().removeprefix("www.")
     candidates: list[EndpointCandidate] = []
-    seen: set[tuple[str, str]] = set()
+    candidate_keys: set[tuple[str, str]] = set()
     pending: list[asyncio.Task[Any]] = []
+    dom_tables: list[dict[str, Any]] = []
+    resource_urls: list[str] = []
+    visited_pages: list[str] = []
+    script_endpoint_hints: list[str] = []
+    all_page_text: list[str] = []
 
     async with async_playwright() as p:
         browser = (
@@ -286,28 +342,49 @@ async def discover_cpc_source(
         )
         page = await context.new_page()
 
+        def add_candidate(candidate: EndpointCandidate) -> None:
+            key = (candidate.method.upper(), candidate.url)
+            if key in candidate_keys:
+                for idx, current in enumerate(candidates):
+                    if (
+                        current.method.upper(),
+                        current.url,
+                    ) == key and candidate.score > current.score:
+                        candidates[idx] = candidate
+                        break
+                return
+            candidate_keys.add(key)
+            candidates.append(candidate)
+
         async def capture(response: Any) -> None:
             request = response.request
             ctype = (await response.all_headers()).get("content-type", "")
             rurl = response.url
-            rhost = urlparse(rurl).netloc.lower().removeprefix("www.")
-            same_family = rhost == host or rhost.endswith("." + host)
+            same_family = _same_site(rurl, host)
             interesting = (
                 same_family
                 or "json" in ctype.lower()
-                or any(token in _norm(rurl) for token in ("prix", "price", "market", "marche", "api", "ajax", "data"))
+                or "csv" in ctype.lower()
+                or any(
+                    token in _norm(rurl)
+                    for token in (
+                        "prix",
+                        "price",
+                        "market",
+                        "marche",
+                        "api",
+                        "ajax",
+                        "data",
+                    )
+                )
             )
             if not interesting:
                 return
-            key = (request.method, rurl)
-            if key in seen:
-                return
-            seen.add(key)
 
             body = ""
             try:
                 raw = await response.body()
-                if len(raw) <= 2_000_000:
+                if len(raw) <= 3_000_000:
                     body = raw.decode("utf-8", errors="replace")
             except Exception:
                 pass
@@ -315,10 +392,13 @@ async def discover_cpc_source(
             score, reasons = _score_candidate(rurl, ctype, body)
             if score >= 4:
                 post_data = request.post_data
-                # Never persist obvious credentials/tokens from POST bodies.
-                if post_data and re.search(r"(password|token|secret|authorization)", post_data, re.I):
+                if post_data and re.search(
+                    r"(password|token|secret|authorization)",
+                    post_data,
+                    re.I,
+                ):
                     post_data = None
-                candidates.append(
+                add_candidate(
                     EndpointCandidate(
                         url=rurl,
                         method=request.method,
@@ -328,72 +408,319 @@ async def discover_cpc_source(
                         request_post_data=post_data,
                         sample=body[:4000],
                         reason=reasons,
+                        source_page=page.url,
+                        discovered_via="network",
                     )
                 )
+
+            if "javascript" in ctype.lower() or rurl.lower().endswith(".js"):
+                for hint in _extract_script_endpoint_hints(body, rurl):
+                    if not _same_site(hint, host):
+                        continue
+                    if hint not in script_endpoint_hints:
+                        script_endpoint_hints.append(hint)
+                    hint_score = 6 + _market_relevance(hint)
+                    if hint_score >= 8:
+                        add_candidate(
+                            EndpointCandidate(
+                                url=hint,
+                                method="GET",
+                                content_type="application/x-endpoint-hint",
+                                status=0,
+                                score=hint_score,
+                                sample="",
+                                reason=["javascript-endpoint-hint"],
+                                source_page=page.url,
+                                discovered_via="javascript",
+                            )
+                        )
 
         def schedule_capture(response: Any) -> None:
             pending.append(asyncio.create_task(capture(response)))
 
         page.on("response", schedule_capture)
-        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+
+        async def collect_page_snapshot() -> None:
+            current_url = page.url
+            if current_url not in visited_pages:
+                visited_pages.append(current_url)
+
+            try:
+                text = (await page.locator("body").inner_text())[:50_000]
+            except Exception:
+                text = ""
+            all_page_text.append(text)
+
+            try:
+                resources = await page.evaluate(
+                    "() => performance.getEntriesByType('resource').map(x => x.name)"
+                )
+                resource_urls.extend(resources)
+            except Exception:
+                pass
+
+            try:
+                tables = await page.evaluate(
+                    """() => Array.from(document.querySelectorAll('table')).map((table, idx) => {
+                        const rows = Array.from(table.querySelectorAll('tr'));
+                        const matrix = rows.map(row => Array.from(row.querySelectorAll('th,td'))
+                            .map(cell => (cell.innerText || '').trim()));
+                        if (!matrix.length) return null;
+                        let headers = matrix[0];
+                        let data = matrix.slice(1);
+                        const thead = Array.from(table.querySelectorAll('thead th'))
+                            .map(x => (x.innerText || '').trim());
+                        if (thead.length) {
+                            headers = thead;
+                            const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
+                            data = bodyRows.map(row => Array.from(row.querySelectorAll('td'))
+                                .map(cell => (cell.innerText || '').trim()));
+                        }
+                        return {
+                            index: idx,
+                            page_url: window.location.href,
+                            headers,
+                            rows: data.slice(0, 1000)
+                        };
+                    }).filter(Boolean)"""
+                )
+                dom_tables.extend(tables)
+            except Exception:
+                pass
+
+            try:
+                inline_scripts = await page.locator(
+                    "script:not([src])"
+                ).all_text_contents()
+                for script in inline_scripts:
+                    for hint in _extract_script_endpoint_hints(
+                        script,
+                        current_url,
+                    ):
+                        if (
+                            _same_site(hint, host)
+                            and hint not in script_endpoint_hints
+                        ):
+                            script_endpoint_hints.append(hint)
+                            add_candidate(
+                                EndpointCandidate(
+                                    url=hint,
+                                    method="GET",
+                                    content_type=(
+                                        "application/x-endpoint-hint"
+                                    ),
+                                    status=0,
+                                    score=7 + _market_relevance(hint),
+                                    reason=[
+                                        "inline-script-endpoint-hint",
+                                    ],
+                                    source_page=current_url,
+                                    discovered_via="javascript",
+                                )
+                            )
+            except Exception:
+                pass
+
+        async def settle() -> None:
+            try:
+                await page.wait_for_load_state(
+                    "networkidle",
+                    timeout=20_000,
+                )
+            except Exception:
+                pass
+            await page.wait_for_timeout(int(settle_seconds * 1000))
+            if pending:
+                await asyncio.gather(
+                    *pending,
+                    return_exceptions=True,
+                )
+
+        async def safe_filter_probe() -> None:
+            selects = page.locator("select")
+            try:
+                count = min(await selects.count(), 4)
+            except Exception:
+                count = 0
+            for idx in range(count):
+                select = selects.nth(idx)
+                try:
+                    options = await select.locator("option").evaluate_all(
+                        """els => els.map((o, i) => ({
+                            index:i, value:o.value, text:(o.innerText||'').trim(),
+                            disabled:o.disabled
+                        }))"""
+                    )
+                    usable = [
+                        item
+                        for item in options
+                        if (
+                            not item["disabled"]
+                            and str(item["value"]).strip()
+                            and _norm(item["text"])
+                            not in {
+                                "choisir",
+                                "selectionner",
+                                "tous",
+                                "tout",
+                            }
+                        )
+                    ]
+                    if usable:
+                        await select.select_option(
+                            value=str(usable[0]["value"])
+                        )
+                        await page.wait_for_timeout(900)
+                except Exception:
+                    continue
+
+            safe_pattern = re.compile(
+                (
+                    r"(afficher|rechercher|chercher|filtrer|actualiser|"
+                    r"consulter|voir|charger)"
+                ),
+                re.I,
+            )
+            buttons = page.locator(
+                "button, input[type=submit], a"
+            )
+            try:
+                count = min(await buttons.count(), 120)
+            except Exception:
+                count = 0
+            clicked = 0
+            for idx in range(count):
+                if clicked >= 4:
+                    break
+                node = buttons.nth(idx)
+                try:
+                    is_input = await node.evaluate(
+                        "(el) => el.tagName === 'INPUT'"
+                    )
+                    text = (
+                        await node.get_attribute("value")
+                        if is_input
+                        else await node.inner_text()
+                    ) or ""
+                    href = await node.get_attribute("href")
+                    if href:
+                        continue
+                    if safe_pattern.search(text) is None:
+                        continue
+                    if re.search(
+                        (
+                            r"(supprimer|delete|envoyer|payer|"
+                            r"connexion|login|inscrire)"
+                        ),
+                        text,
+                        re.I,
+                    ):
+                        continue
+                    if not await node.is_visible():
+                        continue
+                    await node.click(timeout=3000)
+                    clicked += 1
+                    await page.wait_for_timeout(1200)
+                except Exception:
+                    continue
+
+        await page.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout=60_000,
+        )
+        await settle()
+        page_title = await page.title()
+        await collect_page_snapshot()
+
         try:
-            await page.wait_for_load_state("networkidle", timeout=30_000)
+            links = await page.locator("a[href]").evaluate_all(
+                """els => els.map(a => ({
+                    href: a.href,
+                    text: (a.innerText || a.getAttribute('aria-label') || '').trim()
+                }))"""
+            )
         except Exception:
-            pass
-        await page.wait_for_timeout(int(settle_seconds * 1000))
+            links = []
+
+        relevant_pages: list[tuple[int, str]] = []
+        for item in links:
+            href = str(item.get("href") or "")
+            text = str(item.get("text") or "")
+            if not href or not _same_site(href, host):
+                continue
+            score = _market_relevance(href + " " + text)
+            if score >= 3:
+                relevant_pages.append((score, href))
+
+        ordered_pages = [url]
+        for _, href in sorted(
+            relevant_pages,
+            reverse=True,
+        ):
+            if href not in ordered_pages:
+                ordered_pages.append(href)
+        ordered_pages = ordered_pages[:8]
+
+        for target in ordered_pages:
+            if target != page.url:
+                try:
+                    await page.goto(
+                        target,
+                        wait_until="domcontentloaded",
+                        timeout=45_000,
+                    )
+                    await settle()
+                except Exception:
+                    continue
+            await safe_filter_probe()
+            await settle()
+            await collect_page_snapshot()
 
         if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.gather(
+                *pending,
+                return_exceptions=True,
+            )
 
-        page_title = await page.title()
         page_url = page.url
-        page_text = (await page.locator("body").inner_text())[:25_000]
-
-        resource_urls = await page.evaluate(
-            """() => performance.getEntriesByType('resource').map(x => x.name)"""
-        )
-
-        dom_tables = await page.evaluate(
-            """() => Array.from(document.querySelectorAll('table')).map((table, idx) => {
-                const rows = Array.from(table.querySelectorAll('tr'));
-                const matrix = rows.map(row => Array.from(row.querySelectorAll('th,td'))
-                    .map(cell => (cell.innerText || '').trim()));
-                if (!matrix.length) return null;
-                let headers = matrix[0];
-                let data = matrix.slice(1);
-                const thead = Array.from(table.querySelectorAll('thead th'))
-                    .map(x => (x.innerText || '').trim());
-                if (thead.length) {
-                    headers = thead;
-                    const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
-                    data = bodyRows.map(row => Array.from(row.querySelectorAll('td'))
-                        .map(cell => (cell.innerText || '').trim()));
-                }
-                return {index: idx, headers, rows: data.slice(0, 500)};
-            }).filter(Boolean)"""
-        )
-
+        joined_text = "\n".join(all_page_text)
         unit_hint = None
-        norm_text = _norm(page_text)
-        if re.search(r"(fcfa|fca|cfa).{0,8}(kg|kilogram)", page_text, re.I | re.S) or "prixkg" in norm_text:
+        norm_text = _norm(joined_text)
+        if (
+            re.search(
+                r"(fcfa|fca|cfa).{0,12}(kg|kilogram)",
+                joined_text,
+                re.I | re.S,
+            )
+            or "prixkg" in norm_text
+        ):
             unit_hint = "kg"
 
         await context.close()
         await browser.close()
 
-    candidates.sort(key=lambda item: item.score, reverse=True)
+    candidates.sort(
+        key=lambda item: item.score,
+        reverse=True,
+    )
     return DiscoveryReport(
         source_url=url,
         discovered_at=_now_iso(),
         page_title=page_title,
         page_url=page_url,
-        candidates=candidates[:30],
-        dom_tables=dom_tables,
-        resource_urls=list(dict.fromkeys(resource_urls))[:500],
+        candidates=candidates[:50],
+        dom_tables=dom_tables[:100],
+        resource_urls=list(
+            dict.fromkeys(resource_urls)
+        )[:1000],
+        visited_pages=list(
+            dict.fromkeys(visited_pages)
+        ),
+        script_endpoint_hints=script_endpoint_hints[:200],
         unit_hint=unit_hint,
         currency_hint="FCFA",
     )
-
 
 def fetch_candidate(candidate: dict[str, Any], timeout: int = 30) -> tuple[str, str]:
     """Fetch a discovered public endpoint directly after browser discovery."""
