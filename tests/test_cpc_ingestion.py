@@ -1,6 +1,10 @@
 """Tests for CPC market-data normalization."""
 
-from app.ingestion.cpc import normalize_records
+from app.ingestion.cpc import (
+    _extract_script_endpoint_hints,
+    _same_site,
+    normalize_records,
+)
 
 
 def test_normalize_long_market_records() -> None:
@@ -97,3 +101,30 @@ def test_wide_parser_ignores_numeric_locality_labels() -> None:
     products = {row.product_raw for row in rows}
     assert products == {"Rice Paddy", "Steamed Local Rice"}
     assert all(row.market_raw == "Marché 8ème" for row in rows)
+
+
+def test_extract_script_endpoint_hints() -> None:
+    script = """
+    fetch('/api/prix?market=kara');
+    axios.get("/ajax/marches");
+    const ignored = "https://example.com/not-market";
+    """
+
+    hints = _extract_script_endpoint_hints(
+        script,
+        "https://www.cpc-togo.com/sim",
+    )
+
+    assert "https://www.cpc-togo.com/api/prix?market=kara" in hints
+    assert "https://www.cpc-togo.com/ajax/marches" in hints
+
+
+def test_same_site_accepts_subdomain() -> None:
+    assert _same_site(
+        "https://api.cpc-togo.com/prix",
+        "cpc-togo.com",
+    )
+    assert not _same_site(
+        "https://example.com/prix",
+        "cpc-togo.com",
+    )
