@@ -2,6 +2,13 @@ name: CPC Market Data Ingestion
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/ingestion/**"
+      - "scripts/cpc_*.py"
+      - "requirements-ingestion.txt"
+      - ".github/workflows/cpc-market-ingestion.yml"
   schedule:
     # Four light checks per day. The pipeline hashes payloads and is idempotent.
     - cron: "17 */6 * * *"
@@ -45,7 +52,11 @@ jobs:
       - name: Run CPC discovery and ingestion
         run: |
           mkdir -p artifacts
-          python scripts/cpc_ingest.py --report artifacts/cpc-ingestion-report.json
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python scripts/cpc_ingest.py --dry-run --report artifacts/cpc-ingestion-report.json
+          else
+            python scripts/cpc_ingest.py --report artifacts/cpc-ingestion-report.json
+          fi
 
       - name: Upload discovery and quality report
         if: always()
