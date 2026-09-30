@@ -26,7 +26,14 @@ import requests
 
 
 PRICE_WORDS = {"prix", "price", "montant", "valeur", "value", "cout", "coût"}
-MARKET_WORDS = {"marche", "marché", "market", "pointvente", "point_vente"}
+MARKET_WORDS = {
+    "marche",
+    "marché",
+    "market",
+    "walk",
+    "pointvente",
+    "point_vente",
+}
 PRODUCT_WORDS = {"produit", "product", "culture", "denree", "denrée", "speculation"}
 DATE_WORDS = {"date", "jour", "observedat", "observed_at", "createdat", "created_at"}
 UNIT_WORDS = {"unite", "unité", "unit", "conditionnement"}
@@ -36,6 +43,8 @@ META_HEADERS = {
     "region", "région", "prefecture", "préfecture", "departement", "département",
     "commune", "arrondissement", "localite", "localité", "village",
     "zone", "source", "observations", "observation", "rang",
+    "department", "departement", "département", "borough",
+    "arrondissement", "district", "walk", "marche", "marché", "market",
 }
 
 
@@ -51,22 +60,48 @@ def _now_iso() -> str:
 
 
 def _money(value: Any) -> float | None:
+    """Parse a price cell without turning locality labels into numbers.
+
+    A naive parser would incorrectly read values such as "YAOUNDE 2EME" or
+    "Marché 8ème" as prices. After removing known currency/unit tokens, the
+    remaining value must be strictly numeric.
+    """
     if value is None:
         return None
     if isinstance(value, (int, float)):
         return float(value)
+
     text = str(value).strip()
     if not text or text in {"-", "—", "–", "n/a", "N/A", "null", "None"}:
         return None
-    text = text.replace("\u00a0", " ").replace("FCFA", "").replace("F CFA", "")
-    text = text.replace("CFA", "").replace(" ", "")
-    # French decimal comma; thousands separators are handled conservatively.
-    if text.count(",") == 1 and text.count(".") == 0:
-        text = text.replace(",", ".")
-    text = re.sub(r"[^0-9.\-]", "", text)
+
+    cleaned = text.replace("\u00a0", " ")
+    cleaned = re.sub(
+        r"(?i)\b(?:f\s*cfa|fcfa|cfa)\b",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)(?:/\s*)?(?:kg|kilogrammes?|kilos?)\b",
+        "",
+        cleaned,
+    )
+    cleaned = cleaned.replace(" ", "")
+
+    if re.search(r"[A-Za-zÀ-ÿ]", cleaned):
+        return None
+
+    if cleaned.count(",") == 1 and cleaned.count(".") == 0:
+        cleaned = cleaned.replace(",", ".")
+    elif cleaned.count(",") > 1 and cleaned.count(".") == 0:
+        cleaned = cleaned.replace(",", "")
+
+    if not re.fullmatch(r"-?\d+(?:\.\d+)?", cleaned):
+        return None
+
     try:
-        return float(text)
-    except (TypeError, ValueError):
+        return float(cleaned)
+    except ValueError:
         return None
 
 
