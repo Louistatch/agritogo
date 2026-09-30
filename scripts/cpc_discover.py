@@ -14,7 +14,7 @@ from app.ingestion.cpc import discover_cpc_source
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default=os.getenv("CPC_URL", "https://www.cpc-togo.com/"))
+    parser.add_argument("--url", default=os.getenv("CPC_URL", "https://www.cpc-togo.com/prixproduit"))
     parser.add_argument("--output", default="artifacts/cpc-discovery.json")
     parser.add_argument("--settle-seconds", type=float, default=6.0)
     args = parser.parse_args()
