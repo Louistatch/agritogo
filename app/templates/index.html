@@ -8,8 +8,8 @@
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
     <script src="https://js.puter.com/v2/"></script>
-    <link rel="stylesheet" href="/static/style.css">
-    <script src="/static/charts.js"></script>
+    <link rel="stylesheet" href="/static/style.css">\n    <link rel="stylesheet" href="/static/market_intelligence.css">
+    <script src="/static/charts.js"></script>\n    <script src="/static/market_intelligence.js" defer></script>
     <script src="/static/animations.js"></script>
     <script src="/static/thoughts.js"></script>
     <script src="/static/agent_os.js"></script>
@@ -131,16 +131,134 @@
 
         <!-- Markets -->
         <section id="tab-markets" class="tab-content">
-            <div class="section-header">
-                <div><div class="section-title">{{ t.market_data }}</div><div class="section-subtitle">{{ t.market_data_sub }}</div></div>
-            </div>
-            <div class="card">
-                <form hx-post="/prix" hx-target="#markets-output" hx-swap="innerHTML" style="display:flex;gap:8px;margin-bottom:12px">
-                    <select name="produit" style="flex:1">{% for p in produits %}<option value="{{ p.nom }}">{{ p.nom }} ({{ p.categorie }})</option>{% endfor %}</select>
-                    <select name="marche" style="flex:1"><option value="">{{ t.all_markets }}</option>{% for m in marches %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select>
-                    <button type="submit">{{ t.query }}</button>
-                </form>
-                <div id="markets-output"></div>
+            <div class="market-shell">
+                <div class="market-hero">
+                    <div class="market-panel">
+                        <div class="market-kicker">AgriTogo Market Intelligence</div>
+                        <div class="market-title">Prix réels. Marchés comparés. Décisions mieux informées.</div>
+                        <div class="market-copy">
+                            Consultez les observations disponibles par produit et par marché. Les prix observés,
+                            les calculs AgriTogo et les prévisions sont volontairement séparés.
+                        </div>
+
+                        <div class="market-controls">
+                            <div class="market-control">
+                                <label for="market-product">Produit</label>
+                                <select id="market-product" name="produit">
+                                    {% for p in produits %}
+                                    <option value="{{ p.nom }}">{{ p.nom }} · {{ p.categorie }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="market-control">
+                                <label for="market-place">Marché</label>
+                                <select id="market-place" name="marche">
+                                    <option value="">Meilleur prix observé</option>
+                                    {% for m in marches %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <button type="button" class="market-load" onclick="AgriMarket.load()">Actualiser</button>
+                        </div>
+
+                        <div class="market-trustbar">
+                            <span class="market-badge live">Observations uniquement</span>
+                            <span class="market-badge">Prévisions <strong>séparées</strong></span>
+                            <span class="market-badge">Source <strong id="market-price-source">—</strong></span>
+                            <span class="market-badge" id="market-observation-count">— observations</span>
+                        </div>
+                    </div>
+
+                    <div class="market-panel market-price-box">
+                        <div>
+                            <div class="market-price-label">Prix observé · <span id="market-price-market">Marché</span></div>
+                            <div class="market-price-value" id="market-price-value">— <small>FCFA/kg</small></div>
+                            <div class="market-price-meta">
+                                <span id="market-price-delta" class="market-delta flat">Chargement à l'ouverture</span>
+                                <span>·</span>
+                                <span id="market-price-date">Date non disponible</span>
+                            </div>
+                        </div>
+                        <div class="market-range">
+                            <div class="market-mini">
+                                <span>Minimum observé</span>
+                                <strong id="market-price-min">—</strong>
+                            </div>
+                            <div class="market-mini">
+                                <span>Maximum observé</span>
+                                <strong id="market-price-max">—</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="market-grid">
+                    <div class="market-panel">
+                        <div class="market-card-title">
+                            <div>
+                                <h3>Évolution du prix observé</h3>
+                                <p>Historique du produit et du marché sélectionnés.</p>
+                            </div>
+                            <span class="market-badge">Donnée terrain</span>
+                        </div>
+                        <div id="market-price-chart" class="market-chart"></div>
+                    </div>
+
+                    <div class="market-panel market-ai">
+                        <div class="market-ai-mark">AI</div>
+                        <h3>Transformer le prix en décision</h3>
+                        <p>
+                            L'IA AgriTogo utilise les observations disponibles comme point de départ.
+                            Elle doit identifier clairement ce qui est observé, calculé ou prédit.
+                        </p>
+                        <div class="market-actions">
+                            <button class="market-action" type="button" onclick="AgriMarket.quickAsk('sell')">
+                                <strong>Vendre maintenant ou attendre ?</strong>
+                                <span>Prix, tendance, risque et horizon.</span>
+                            </button>
+                            <button class="market-action" type="button" onclick="AgriMarket.quickAsk('where')">
+                                <strong>Où vendre ?</strong>
+                                <span>Comparer les marchés avant transport.</span>
+                            </button>
+                            <button class="market-action" type="button" onclick="AgriMarket.quickAsk('store')">
+                                <strong>Stocker ou vendre ?</strong>
+                                <span>Comparer gain potentiel et risque de stockage.</span>
+                            </button>
+                        </div>
+                        <div class="market-provenance">
+                            <span>OBSERVÉ = source de marché</span>
+                            <span>·</span>
+                            <span>PRÉVU = modèle AgriTogo</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="market-panel">
+                    <div class="market-card-title">
+                        <div>
+                            <h3>Marchés les plus intéressants</h3>
+                            <p>Classement par dernier prix observé. Le prix brut ne tient pas encore compte du transport.</p>
+                        </div>
+                        <span class="market-badge">Variation 30 j</span>
+                    </div>
+                    <div id="market-ranking" class="market-ranking">
+                        <div class="market-rank-empty">Ouvrez l'onglet Marchés pour charger les observations.</div>
+                    </div>
+                </div>
+
+                <details class="market-panel market-details">
+                    <summary>
+                        <span>Voir les observations brutes</span>
+                        <span>Produit · marché · date · source</span>
+                    </summary>
+                    <button
+                        type="button"
+                        class="btn-sm"
+                        hx-post="/prix"
+                        hx-include="#market-product, #market-place"
+                        hx-target="#markets-output"
+                        hx-swap="innerHTML">Charger les observations</button>
+                    <div id="markets-output" style="margin-top:12px"></div>
+                </details>
             </div>
         </section>
 
