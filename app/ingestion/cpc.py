@@ -287,6 +287,34 @@ def _market_relevance(text: str) -> int:
     return score
 
 
+
+def _safe_endpoint_hint(candidate_url: str, root_host: str) -> bool:
+    """Allow relevant public reporting backends while excluding tracking/CDNs."""
+    parsed = urlparse(candidate_url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    if parsed.scheme not in {"http", "https"} or not host:
+        return False
+    if _same_site(candidate_url, root_host):
+        return True
+
+    blocked = (
+        "google-analytics.com",
+        "googletagmanager.com",
+        "gstatic.com",
+        "googleapis.com",
+        "facebook.com",
+        "doubleclick.net",
+        "jsdelivr.net",
+        "cdnjs.cloudflare.com",
+        "unpkg.com",
+        "sentry.io",
+        "hotjar.com",
+    )
+    if any(host == item or host.endswith("." + item) for item in blocked):
+        return False
+
+    return _market_relevance(candidate_url) >= 5
+
 def _extract_script_endpoint_hints(script_text: str, base_url: str) -> list[str]:
     """Extract likely public data endpoints embedded in front-end JavaScript."""
     if not script_text:
@@ -427,7 +455,7 @@ async def discover_cpc_source(
 
             if "javascript" in ctype.lower() or rurl.lower().endswith(".js"):
                 for hint in _extract_script_endpoint_hints(body, rurl):
-                    if not _same_site(hint, host):
+                    if not _safe_endpoint_hint(hint, host):
                         continue
                     if hint not in script_endpoint_hints:
                         script_endpoint_hints.append(hint)
@@ -510,7 +538,7 @@ async def discover_cpc_source(
                         current_url,
                     ):
                         if (
-                            _same_site(hint, host)
+                            _safe_endpoint_hint(hint, host)
                             and hint not in script_endpoint_hints
                         ):
                             script_endpoint_hints.append(hint)
