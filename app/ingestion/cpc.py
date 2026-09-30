@@ -900,6 +900,52 @@ def _wide_product_keys(record: dict[str, Any], excluded: Iterable[str]) -> list[
     return product_keys
 
 
+def _parse_product_dimension(
+    header: str,
+    unit_hint: str | None,
+) -> tuple[str, str, str | None, bool]:
+    """Split a wide-table column into product, sale level and unit.
+
+    CPC historically distinguishes retail (détail) and wholesale (gros)
+    prices. Some SIM tables encode that dimension directly in column names.
+    """
+    raw = " ".join(str(header).split())
+    lowered = unicodedata.normalize("NFKD", raw)
+    lowered = "".join(
+        char
+        for char in lowered
+        if not unicodedata.combining(char)
+    ).lower()
+
+    price_type = "unknown"
+    if re.search(r"\b(gros|grossiste|wholesale)\b", lowered):
+        price_type = "wholesale"
+    elif re.search(r"\b(detail|retail|detaillant)\b", lowered):
+        price_type = "retail"
+
+    detected_unit = None
+    if re.search(r"\b(kg|kilogrammes?|kilos?)\b", lowered):
+        detected_unit = "kg"
+
+    product = re.sub(
+        (
+            r"(?i)\b(?:prix|price|vente|sale|"
+            r"gros|grossiste|wholesale|"
+            r"d[ée]tail|retail|d[ée]taillant|"
+            r"kg|kilogrammes?|kilos?|fcfa|cfa)\b"
+        ),
+        " ",
+        raw,
+    )
+    product = re.sub(r"[()\[\]/:_-]+", " ", product)
+    product = " ".join(product.split()).strip()
+
+    unit = detected_unit or unit_hint
+    unit_inferred = bool(unit_hint and not detected_unit)
+    return product or raw, price_type, unit, unit_inferred
+
+
+
 def normalize_records(
     records: list[dict[str, Any]],
     source_url: str,
@@ -933,22 +979,41 @@ def normalize_records(
         if product_key and price_key:
             price = _money(row.get(price_key))
             product = str(row.get(product_key, "")).strip()
+            inferred_product, inferred_type, inferred_unit, inferred_flag = (
+                _parse_product_dimension(product, unit_hint)
+            )
+            explicit_type = (
+                str(row.get(price_type_key, "")).strip()
+                if price_type_key
+                else ""
+            )
+            explicit_unit = (
+                str(row.get(unit_key, "")).strip()
+                if unit_key
+                else ""
+            )
             if price is not None:
                 observations.append(
                     _build_observation(
                         source=source,
                         source_url=source_url,
                         market=market,
-                        product=product,
+                        product=inferred_product,
                         observed=observed,
                         price=price,
-                        unit=(str(row.get(unit_key, "")).strip() if unit_key else "") or unit_hint,
-                        currency=(str(row.get(currency_key, "")).strip() if currency_key else "") or "FCFA",
-                        price_type=(str(row.get(price_type_key, "")).strip() if price_type_key else "") or "unknown",
+                        unit=explicit_unit or inferred_unit,
+                        currency=(
+                            str(row.get(currency_key, "")).strip()
+                            if currency_key
+                            else ""
+                        ) or "FCFA",
+                        price_type=explicit_type or inferred_type,
                         region=str(row.get(region_key, "")).strip() if region_key else None,
                         locality=str(row.get(locality_key, "")).strip() if locality_key else None,
                         raw=row,
-                        unit_inferred=bool(unit_hint and not unit_key),
+                        unit_inferred=(
+                            inferred_flag and not explicit_unit
+                        ),
                     )
                 )
             continue
@@ -964,21 +1029,27 @@ def normalize_records(
             price = _money(row.get(key))
             if price is None:
                 continue
+            (
+                product_name,
+                inferred_type,
+                inferred_unit,
+                inferred_flag,
+            ) = _parse_product_dimension(str(key), unit_hint)
             observations.append(
                 _build_observation(
                     source=source,
                     source_url=source_url,
                     market=market,
-                    product=str(key).strip(),
+                    product=product_name,
                     observed=observed,
                     price=price,
-                    unit=unit_hint,
+                    unit=inferred_unit,
                     currency="FCFA",
-                    price_type="unknown",
+                    price_type=inferred_type,
                     region=str(row.get(region_key, "")).strip() if region_key else None,
                     locality=str(row.get(locality_key, "")).strip() if locality_key else None,
                     raw=row,
-                    unit_inferred=bool(unit_hint),
+                    unit_inferred=inferred_flag,
                 )
             )
 
