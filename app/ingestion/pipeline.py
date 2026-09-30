@@ -7,6 +7,7 @@ import json
 import unicodedata
 import re
 from datetime import datetime, timezone
+from statistics import median
 from typing import Any
 
 from app.database import get_db
@@ -31,7 +32,28 @@ class MarketIngestionPipeline:
         self.sb = get_db()
         self.source = source
 
+    def _source_config(self) -> dict[str, Any]:
+        try:
+            rows = (
+                self.sb.table("market_data_sources")
+                .select("*")
+                .eq("code", self.source)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if rows:
+                return rows[0]
+        except Exception:
+            pass
+        return {"code": self.source, "trust_weight": 1.0, "enabled": True}
+
     def start_run(self, source_url: str, discovery: dict[str, Any]) -> str:
+        source_cfg = self._source_config()
+        if source_cfg.get("enabled") is False:
+            raise RuntimeError(f"Market source {self.source} is disabled")
+
         result = self.sb.table("market_ingestion_runs").insert({
             "source": self.source,
             "source_url": source_url,
@@ -80,6 +102,9 @@ class MarketIngestionPipeline:
     ) -> dict[str, int]:
         accepted = review = rejected = 0
         rows = []
+        source_cfg = self._source_config()
+        trust_weight = float(source_cfg.get("trust_weight") or 1.0)
+
         for obs in observations:
             if obs.quality_status == "accepted":
                 accepted += 1
@@ -103,6 +128,11 @@ class MarketIngestionPipeline:
                 "currency": obs.currency,
                 "price_type": obs.price_type,
                 "quality_score": obs.quality_score,
+                "source_trust_weight": trust_weight,
+                "effective_quality_score": round(
+                    obs.quality_score * trust_weight,
+                    4,
+                ),
                 "quality_status": obs.quality_status,
                 "quality_reason": obs.quality_reason,
                 "raw_record": obs.raw_record,
@@ -161,6 +191,65 @@ class MarketIngestionPipeline:
                 mapping.setdefault(_norm(row["market_name"]), str(row["region_id"]))
         return mapping
 
+    def _anomaly_check(
+        self,
+        culture_id: str,
+        market_name: str,
+        price: float,
+        unit: str,
+    ) -> tuple[str, float, str | None]:
+        """Detect suspicious jumps with robust statistics.
+
+        The gate is deliberately conservative: it quarantines a record for
+        review rather than deleting it. With little history, the record passes
+        and receives an "insufficient_history" marker.
+        """
+        try:
+            history = (
+                self.sb.table("market_prices")
+                .select("price,unit")
+                .eq("culture_id", culture_id)
+                .eq("market_name", market_name)
+                .eq("data_kind", "observation")
+                .order("observed_at", desc=True)
+                .limit(60)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            return "unchecked", 0.0, "history_query_failed"
+
+        comparable = [
+            float(row["price"])
+            for row in history
+            if row.get("price") is not None
+            and (row.get("unit") or "unknown") == unit
+            and float(row["price"]) > 0
+        ]
+        if len(comparable) < 6:
+            return "insufficient_history", 0.0, None
+
+        center = median(comparable)
+        deviations = [abs(value - center) for value in comparable]
+        mad = median(deviations)
+        ratio = price / center if center > 0 else 1.0
+
+        if mad > 0:
+            score = 0.6745 * abs(price - center) / mad
+        else:
+            score = abs(ratio - 1.0) * 10.0
+
+        suspicious = score > 8.0 or ratio > 2.5 or ratio < 0.4
+        if suspicious:
+            reason = (
+                f"robust_outlier: score={score:.2f}, "
+                f"ratio_to_median={ratio:.2f}, median={center:.2f}"
+            )
+            return "suspicious", round(score, 3), reason
+
+        return "normal", round(score, 3), None
+
     def promote(self, run_id: str) -> dict[str, int]:
         """Promote accepted staged observations when product/market mapping is safe."""
         staged = (
@@ -177,7 +266,8 @@ class MarketIngestionPipeline:
         cultures = self._cultures()
         market_regions = self._market_regions()
 
-        promoted = unresolved_product = unresolved_market = errors = 0
+        promoted = unresolved_product = unresolved_market = quarantined = 0
+        errors = 0
 
         for row in staged:
             product_norm = _norm(row["product_raw"])
@@ -209,7 +299,31 @@ class MarketIngestionPipeline:
                 continue
             if not region_id:
                 unresolved_market += 1
-                self._mark_stage(row["id"], "needs_mapping", "unresolved_market")
+                self._mark_stage(
+                    row["id"],
+                    "needs_mapping",
+                    "unresolved_market",
+                )
+                continue
+
+            unit = row.get("unit") or "unknown"
+            anomaly_status, anomaly_score, anomaly_reason = self._anomaly_check(
+                str(culture_id),
+                market_name,
+                float(row["price"]),
+                unit,
+            )
+            if anomaly_status == "suspicious":
+                quarantined += 1
+                self._mark_stage(
+                    row["id"],
+                    "needs_review",
+                    anomaly_reason,
+                    market_canonical=market_name,
+                    product_canonical=product_name,
+                    anomaly_status=anomaly_status,
+                    anomaly_score=anomaly_score,
+                )
                 continue
 
             payload = {
@@ -217,7 +331,7 @@ class MarketIngestionPipeline:
                 "region_id": region_id,
                 "market_name": market_name,
                 "price": row["price"],
-                "unit": row.get("unit") or "unknown",
+                "unit": unit,
                 "currency": row.get("currency") or "FCFA",
                 "verified": True,
                 "source": self.source,
@@ -227,7 +341,11 @@ class MarketIngestionPipeline:
                 "data_kind": "observation",
                 "source_record_hash": row["record_hash"],
                 "price_type": row.get("price_type") or "unknown",
-                "quality_score": row.get("quality_score"),
+                "quality_score": row.get("effective_quality_score")
+                or row.get("quality_score"),
+                "source_trust_weight": row.get("source_trust_weight") or 1.0,
+                "anomaly_score": anomaly_score,
+                "anomaly_status": anomaly_status,
                 "ingestion_run_id": run_id,
             }
 
@@ -243,6 +361,8 @@ class MarketIngestionPipeline:
                     None,
                     market_canonical=market_name,
                     product_canonical=product_name,
+                    anomaly_status=anomaly_status,
+                    anomaly_score=anomaly_score,
                 )
             except Exception as exc:
                 errors += 1
@@ -252,6 +372,7 @@ class MarketIngestionPipeline:
             "promoted": promoted,
             "unresolved_product": unresolved_product,
             "unresolved_market": unresolved_market,
+            "quarantined": quarantined,
             "errors": errors,
         }
 
@@ -263,6 +384,8 @@ class MarketIngestionPipeline:
         *,
         market_canonical: str | None = None,
         product_canonical: str | None = None,
+        anomaly_status: str | None = None,
+        anomaly_score: float | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "quality_status": status,
@@ -272,7 +395,14 @@ class MarketIngestionPipeline:
             payload["market_canonical"] = market_canonical
         if product_canonical is not None:
             payload["product_canonical"] = product_canonical
-        self.sb.table("market_price_staging").update(payload).eq("id", stage_id).execute()
+        if anomaly_status is not None:
+            payload["anomaly_status"] = anomaly_status
+        if anomaly_score is not None:
+            payload["anomaly_score"] = anomaly_score
+        self.sb.table("market_price_staging").update(payload).eq(
+            "id",
+            stage_id,
+        ).execute()
 
     def finish_run(
         self,
@@ -298,7 +428,38 @@ class MarketIngestionPipeline:
                 staged.get("needs_review", 0)
                 + promoted.get("unresolved_product", 0)
                 + promoted.get("unresolved_market", 0)
+                + promoted.get("quarantined", 0)
             ),
             "rejected_count": staged.get("rejected", 0),
             "error": error,
         }).eq("id", run_id).execute()
+
+        try:
+            latest = (
+                self.sb.table("market_price_staging")
+                .select("observed_at")
+                .eq("run_id", run_id)
+                .order("observed_at", desc=True)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            source_update: dict[str, Any] = {
+                "last_status": status,
+                "last_error": error,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            if status in {"success", "partial"}:
+                source_update["last_success_at"] = datetime.now(
+                    timezone.utc,
+                ).isoformat()
+            if latest:
+                source_update["last_observation_at"] = latest[0][
+                    "observed_at"
+                ]
+            self.sb.table("market_data_sources").update(
+                source_update,
+            ).eq("code", self.source).execute()
+        except Exception:
+            pass
