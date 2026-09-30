@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, request
 from app.database import (
     get_prix_historiques, get_produits, get_marches, get_db_stats,
     add_produit, delete_produit, add_prix_from_csv, get_all_prix, delete_prix,
-    get_latest_prices,
+    get_latest_prices, get_market_overview,
 )
 from .auth_guard import require_super_admin
 from app.kobo import save_kobo_config, load_kobo_config, KoboClient
@@ -48,6 +48,27 @@ def prix(produit):
             agg['produit'] = real_name
             data = agg.to_dict(orient='records')
         return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/market-intelligence/<produit>")
+def market_intelligence(produit):
+    """Observed market snapshot by market for one agricultural product."""
+    try:
+        all_prods = {
+            p["nom"].lower().replace("ï", "i").replace("é", "e").replace("è", "e"): p["nom"]
+            for p in get_produits()
+        }
+        normalized = produit.lower().replace("ï", "i").replace("é", "e").replace("è", "e")
+        real_name = all_prods.get(normalized, produit)
+        overview = get_market_overview(real_name, 500)
+        return jsonify({
+            "produit": real_name,
+            "markets": overview,
+            "observed_only": True,
+            "forecast_included": False,
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
