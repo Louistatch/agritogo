@@ -303,7 +303,7 @@ def _extract_script_endpoint_hints(script_text: str, base_url: str) -> list[str]
 
 
 async def discover_cpc_source(
-    url: str = "https://www.cpc-togo.com/",
+    url: str = "https://www.cpc-togo.com/prixproduit",
     browser_ws_endpoint: str | None = None,
     settle_seconds: float = 6.0,
 ) -> DiscoveryReport:
@@ -729,7 +729,7 @@ def fetch_candidate(candidate: dict[str, Any], timeout: int = 30) -> tuple[str, 
     headers = {
         "User-Agent": "AgriTogoData/1.0 (+market intelligence; respectful polling)",
         "Accept": "application/json,text/csv,text/plain,text/html;q=0.8,*/*;q=0.5",
-        "Referer": "https://www.cpc-togo.com/",
+        "Referer": "https://www.cpc-togo.com/prixproduit",
     }
     kwargs: dict[str, Any] = {"headers": headers, "timeout": timeout}
     post_data = candidate.get("request_post_data")
