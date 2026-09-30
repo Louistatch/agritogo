@@ -154,3 +154,27 @@ def test_normalize_html_php_table_fragment() -> None:
     assert {row.product_raw for row in rows} == {"Maïs", "Soja"}
     assert all(row.market_raw == "Marché de Kara" for row in rows)
     assert all(row.observed_at == "2026-09-30" for row in rows)
+
+
+def test_wide_headers_preserve_retail_and_wholesale_dimension() -> None:
+    records = [
+        {
+            "Marché": "Kara",
+            "Maïs détail FCFA/kg": "260",
+            "Maïs gros FCFA/kg": "225",
+            "Date": "30/09/2026",
+        },
+    ]
+
+    rows = normalize_records(
+        records,
+        "https://www.cpc-togo.com/prixproduit",
+    )
+
+    assert len(rows) == 2
+    by_type = {row.price_type: row for row in rows}
+    assert by_type["retail"].product_raw == "Maïs"
+    assert by_type["wholesale"].product_raw == "Maïs"
+    assert by_type["retail"].price == 260
+    assert by_type["wholesale"].price == 225
+    assert all(row.unit == "kg" for row in rows)
