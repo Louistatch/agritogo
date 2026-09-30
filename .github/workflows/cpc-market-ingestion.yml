@@ -18,7 +18,7 @@ permissions:
 
 concurrency:
   group: cpc-market-ingestion
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   ingest:
