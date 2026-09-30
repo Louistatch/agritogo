@@ -358,11 +358,18 @@ def delete_produit(produit_id: str):
 
 
 def add_prix_from_csv(csv_content: str) -> dict:
-    """Import prices from CSV (produit,marche,prix,date)."""
+    """Import observed prices.
+
+    Supported CSV columns:
+    produit, marche, prix, date, source, source_url, unite, devise.
+    The provenance columns are optional and gracefully fall back on legacy
+    deployments where the migration has not yet been applied.
+    """
     import csv, io
     reader = csv.DictReader(io.StringIO(csv_content))
     inserted, errors = 0, 0
     cultures_cache = {c["nom"].lower(): c["id"] for c in get_produits()}
+
     for row in reader:
         try:
             nom = row.get("produit", "").strip()
@@ -370,24 +377,47 @@ def add_prix_from_csv(csv_content: str) -> dict:
             if not cid:
                 errors += 1
                 continue
-            # Find region for market
+
             marche = row.get("marche", "").strip()
             sb = _get_client()
-            rres = sb.table("market_prices").select("region_id").ilike("market_name", f"%{marche}%").limit(1).execute()
+            rres = (
+                sb.table("market_prices")
+                .select("region_id")
+                .ilike("market_name", f"%{marche}%")
+                .limit(1)
+                .execute()
+            )
             rid = rres.data[0]["region_id"] if rres.data else None
             if not rid:
                 errors += 1
                 continue
-            sb.table("market_prices").insert({
-                "culture_id": cid, "region_id": rid, "market_name": marche,
-                "price": int(float(row.get("prix", 0))), "unit": "kg", "currency": "FCFA",
-                "created_at": row.get("date", datetime.now().isoformat()),
-            }).execute()
+
+            observed_at = row.get("date") or datetime.now().isoformat()
+            base = {
+                "culture_id": cid,
+                "region_id": rid,
+                "market_name": marche,
+                "price": int(float(row.get("prix", 0))),
+                "unit": (row.get("unite") or "kg").strip(),
+                "currency": (row.get("devise") or "FCFA").strip(),
+                "created_at": observed_at,
+                "verified": True,
+            }
+            extended = {
+                **base,
+                "source": (row.get("source") or "manual").strip(),
+                "source_url": (row.get("source_url") or "").strip() or None,
+                "observed_at": observed_at,
+                "data_kind": "observation",
+            }
+            try:
+                sb.table("market_prices").insert(extended).execute()
+            except Exception:
+                sb.table("market_prices").insert(base).execute()
             inserted += 1
         except Exception:
             errors += 1
     return {"inserted": inserted, "errors": errors}
-
 
 def add_produit_from_csv(csv_content: str) -> dict:
     import csv, io
