@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 20
     env:
       PYTHONPATH: .
-      CPC_URL: https://www.cpc-togo.com/
+      CPC_URL: https://www.cpc-togo.com/prixproduit
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
       CPC_BROWSER_WS_ENDPOINT: ${{ secrets.CPC_BROWSER_WS_ENDPOINT }}
