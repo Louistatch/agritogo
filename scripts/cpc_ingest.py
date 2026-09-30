@@ -21,7 +21,7 @@ def _write_json(path: str, payload: object) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default=os.getenv("CPC_URL", "https://www.cpc-togo.com/"))
+    parser.add_argument("--url", default=os.getenv("CPC_URL", "https://www.cpc-togo.com/prixproduit"))
     parser.add_argument("--report", default="artifacts/cpc-ingestion-report.json")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--settle-seconds", type=float, default=6.0)
