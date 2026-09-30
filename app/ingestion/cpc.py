@@ -17,6 +17,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from html.parser import HTMLParser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -217,7 +218,18 @@ def _score_candidate(url: str, content_type: str, text: str) -> tuple[int, list[
     normalized_url = _norm(url)
     normalized_body = _norm(text[:12000])
 
-    for word, pts in (("prix", 4), ("price", 4), ("marche", 3), ("market", 3), ("produit", 2), ("data", 1), ("api", 2), ("ajax", 1)):
+    for word, pts in (
+        ("prix", 4),
+        ("price", 4),
+        ("marche", 3),
+        ("market", 3),
+        ("produit", 2),
+        ("tableau", 3),
+        ("phpfiles", 3),
+        ("data", 1),
+        ("api", 2),
+        ("ajax", 1),
+    ):
         if word in normalized_url:
             score += pts
             reasons.append(f"url:{word}")
@@ -747,6 +759,73 @@ def fetch_candidate(candidate: dict[str, Any], timeout: int = 30) -> tuple[str, 
     return response.text, response.headers.get("content-type", "")
 
 
+
+class _TableHTMLParser(HTMLParser):
+    """Small dependency-free HTML table extractor for XHR/PHP fragments."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tables: list[list[list[str]]] = []
+        self._table: list[list[str]] | None = None
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        del attrs
+        tag = tag.lower()
+        if tag == "table":
+            self._table = []
+        elif tag == "tr" and self._table is not None:
+            self._row = []
+        elif tag in {"td", "th"} and self._row is not None:
+            self._cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"td", "th"} and self._cell is not None:
+            value = " ".join("".join(self._cell).split())
+            if self._row is not None:
+                self._row.append(value)
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            if self._table is not None and any(self._row):
+                self._table.append(self._row)
+            self._row = None
+        elif tag == "table" and self._table is not None:
+            if self._table:
+                self.tables.append(self._table)
+            self._table = None
+
+
+def _dom_tables_from_html(text: str) -> list[dict[str, Any]]:
+    parser = _TableHTMLParser()
+    parser.feed(text)
+    tables: list[dict[str, Any]] = []
+
+    for matrix in parser.tables:
+        if len(matrix) < 2:
+            continue
+        headers = [cell.strip() for cell in matrix[0]]
+        width = len(headers)
+        if width < 2:
+            continue
+        rows = []
+        for row in matrix[1:]:
+            values = list(row) + [""] * max(0, width - len(row))
+            rows.append(values[:width])
+        tables.append({"headers": headers, "rows": rows})
+
+    return tables
+
+
 def _find_record_lists(payload: Any, depth: int = 0) -> list[list[dict[str, Any]]]:
     """Find JSON arrays that look like records without assuming one API schema."""
     if depth > 8:
@@ -910,13 +989,34 @@ def normalize_payload(
     source: str = "SIM-CPC",
     unit_hint: str | None = None,
 ) -> list[MarketObservation]:
-    if "json" in content_type.lower() or text.lstrip().startswith(("{", "[")):
+    """Normalize JSON feeds or HTML/PHP table fragments."""
+    lowered = content_type.lower()
+    stripped = text.lstrip()
+
+    if "json" in lowered or stripped.startswith(("{", "[")):
         try:
-            return normalize_records(_records_from_json(text), source_url, source, unit_hint)
+            return normalize_records(
+                _records_from_json(text),
+                source_url,
+                source,
+                unit_hint,
+            )
         except Exception:
             return []
-    return []
 
+    if "html" in lowered or "<table" in stripped.lower():
+        try:
+            tables = _dom_tables_from_html(text)
+            return normalize_dom_tables(
+                tables,
+                source_url,
+                source,
+                unit_hint,
+            )
+        except Exception:
+            return []
+
+    return []
 
 def _build_observation(
     *,
