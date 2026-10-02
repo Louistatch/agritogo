@@ -13,6 +13,10 @@ dashscope==1.25.17
 openai==2.34.0
 google-genai==1.74.0
 agentscope==1.0.19.post1
+# agentscope importe `streamablehttp_client`, supprimé de mcp 2.x : sans cette borne,
+# pip installait mcp 2.2.0 et tout le moteur multi-agent (/api/v1/agent/chat) tombait
+# en ImportError. Vérifié : mcp 1.30.0 + agentscope 1.0.19.post1 s'importent.
+mcp>=1.13,<2
 numpy==2.4.4
 scipy==1.17.1
 statsmodels==0.14.6
