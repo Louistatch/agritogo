@@ -664,6 +664,26 @@ class MarketIngestionPipeline:
             "error": error,
         }).eq("id", run_id).execute()
 
+        # Les relevés non publiés d'un passage précédent sont relus et retraités
+        # à chaque passage (toutes les pages de la source) : ceux qui portent
+        # encore un ancien run_id sont donc des variantes obsolètes (date ou unité
+        # mal lues autrefois). On les marque pour garder une file lisible.
+        if status in {"success", "partial"}:
+            try:
+                (
+                    self.sb.table("market_price_staging")
+                    .update({
+                        "quality_status": "superseded",
+                        "quality_reason": "ancien passage : relevé relu et retraité depuis",
+                    })
+                    .eq("source", self.source)
+                    .neq("run_id", run_id)
+                    .in_("quality_status", ["accepted", "error", "needs_review", "needs_mapping"])
+                    .execute()
+                )
+            except Exception:
+                pass
+
         try:
             latest = (
                 self.sb.table("market_price_staging")

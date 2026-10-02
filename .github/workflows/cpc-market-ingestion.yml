@@ -18,7 +18,9 @@ permissions:
 
 concurrency:
   group: cpc-market-ingestion
-  cancel-in-progress: true
+  # Un passage planifié ne doit pas tuer un passage en cours au milieu de la
+  # publication (lots de 100) : il attend son tour.
+  cancel-in-progress: false
 
 jobs:
   ingest:

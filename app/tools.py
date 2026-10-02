@@ -3,6 +3,7 @@
 from agentscope.tool import ToolResponse
 from app.database import (
     get_prix_historiques,
+    get_tendance_zone,
     get_produits,
     get_marches,
     save_prevision,
@@ -91,23 +92,68 @@ async def enregistrer_prevision(
     )
 
 
+def _sens(row: dict) -> str:
+    if not row.get("trend_known"):
+        return "pas de période de comparaison"
+    trend = row.get("trend")
+    pct = row.get("change_pct")
+    pct_txt = f"{float(pct):+.1f} %" if pct is not None else ""
+    label = {"up": "📈 HAUSSE", "down": "📉 BAISSE"}.get(trend, "➡️ STABLE")
+    return f"{label} {pct_txt} sur 21 jours (contre {row.get('previous_price')} FCFA/kg avant)"
+
+
 async def analyser_tendance(
     produit: str,
     marche: str = "",
 ) -> ToolResponse:
-    """Analyse la tendance des prix d'un produit sur les derniers mois.
+    """Prix actuel et tendance d'un produit, par zone (région, préfecture ou canton).
+
+    À utiliser pour toute question « quand vendre », « le prix monte-t-il »,
+    « où vendre ». Données observées (SIM-CPC et saisies FaîtiereHub),
+    dédupliquées : médiane par marché puis par zone, tendance = 21 derniers jours
+    contre les 42 jours précédents, courbe = médianes hebdomadaires.
 
     Args:
-        produit: Nom du produit agricole.
-        marche: Nom du marché. Vide = tous les marchés.
+        produit: Nom du produit (ex: Maïs, Soja, Riz, Riz paddy, Haricot, Gari...).
+        marche: Zone : région (Kara), préfecture (Binah) ou canton/marché (Kétao).
+            Vide = une ligne par région.
 
     Returns:
-        Analyse statistique de la tendance.
+        Par zone : prix médian, fourchette, nombre de marchés, date du dernier
+        relevé, tendance chiffrée et courbe hebdomadaire.
     """
+    try:
+        rows = get_tendance_zone(produit, marche or None)
+    except Exception:
+        rows = []
+
+    if rows:
+        niveau = {"region": "région", "prefecture": "préfecture", "canton": "canton"}
+        lines = [f"Prix et tendance — {produit}" + (f" — {marche}" if marche else " — par région") + ":"]
+        for r in rows[:12]:
+            age = r.get("age_days") or 0
+            fraicheur = "relevé récent" if age <= 14 else f"⚠️ relevé ancien ({age} jours)"
+            courbe = r.get("history") or []
+            lines.append(
+                f"  • {r.get('scope_name')} ({niveau.get(r.get('scope'), r.get('scope'))}, {r.get('region_name')}) : "
+                f"{r.get('price')} FCFA/kg (fourchette {r.get('price_min')}–{r.get('price_max')}, "
+                f"{r.get('n_markets')} marché(s) : {', '.join((r.get('markets') or [])[:6])}) — "
+                f"dernier relevé {r.get('last_observed')} ({fraicheur}) — {_sens(r)}"
+                + (f" — courbe hebdo : {' → '.join(str(v) for v in courbe[-8:])}" if len(courbe) >= 2 else "")
+                + f" — source : {', '.join(r.get('sources') or [])}"
+            )
+        lines.append(
+            "  Méthode : données observées dédupliquées, médiane par marché puis par zone ; "
+            "tendance = 21 j contre les 42 j précédents (seuil ±3 %)."
+        )
+        return ToolResponse(content="\n".join(lines))
+
+    # Repli : relevés bruts, si la vue partagée n'est pas disponible.
     data = get_prix_historiques(produit, marche or None, 60)
     if len(data) < 2:
         return ToolResponse(
-            content=f"Pas assez de données pour analyser {produit}.",
+            content=f"Pas assez de données pour analyser {produit}"
+            + (f" à {marche}" if marche else "") + ".",
         )
 
     prix_list = [r["prix"] for r in data]
@@ -117,10 +163,6 @@ async def analyser_tendance(
     moy_recent = sum(prix_recent) / len(prix_recent)
     moy_ancien = sum(prix_ancien) / len(prix_ancien)
     variation = ((moy_recent - moy_ancien) / moy_ancien) * 100
-
-    prix_min = min(prix_list)
-    prix_max = max(prix_list)
-    prix_moy = sum(prix_list) / len(prix_list)
 
     if variation > 5:
         tendance = "📈 HAUSSE"
@@ -132,10 +174,10 @@ async def analyser_tendance(
     return ToolResponse(
         content=(
             f"Analyse de {produit}"
-            + (f" à {marche}" if marche else "") + ":\n"
+            + (f" à {marche}" if marche else "") + " (relevés bruts, faible confiance):\n"
             f"  Tendance: {tendance} ({variation:+.1f}%)\n"
-            f"  Prix moyen: {prix_moy:.0f} FCFA/kg\n"
-            f"  Min: {prix_min:.0f} | Max: {prix_max:.0f} FCFA/kg\n"
+            f"  Prix moyen: {sum(prix_list) / len(prix_list):.0f} FCFA/kg\n"
+            f"  Min: {min(prix_list):.0f} | Max: {max(prix_list):.0f} FCFA/kg\n"
             f"  Données: {len(prix_list)} observations"
         ),
     )
