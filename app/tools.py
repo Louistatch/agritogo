@@ -181,3 +181,55 @@ async def analyser_tendance(
             f"  Données: {len(prix_list)} observations"
         ),
     )
+
+
+async def prevoir_prix(
+    produit: str,
+    marche: str = "",
+) -> ToolResponse:
+    """Prévision du prix d'un produit pour les 4 prochaines semaines.
+
+    À utiliser pour « quel sera le prix », « le prix va-t-il monter »,
+    « faut-il attendre pour vendre ». Modèle évalué sur les données réelles :
+    la réponse donne sa précision mesurée et sa confiance ; c'est une
+    PRÉVISION, jamais un prix observé.
+
+    Args:
+        produit: Nom du produit (Maïs, Soja, Sorgho, Haricot, Riz, Mil...).
+        marche: Zone : région (Kara), préfecture (Binah) ou canton (Kétao).
+            Vide = Togo entier.
+
+    Returns:
+        Dernier prix observé, prévisions hebdomadaires avec fourchette à 80 %,
+        sens attendu, précision mesurée contre « le prix ne bouge pas ».
+    """
+    try:
+        from app.ml.price_forecast import run_price_forecast
+
+        r = run_price_forecast(produit, marche or None)
+    except Exception as exc:  # pragma: no cover - dépend de la base
+        return ToolResponse(content=f"Prévision indisponible pour {produit} : {exc}")
+    if not r.get("ok"):
+        return ToolResponse(
+            content=f"Pas de prévision fiable pour {produit}"
+            + (f" à {marche}" if marche else "")
+            + f" : {r.get('reason')}. Utilise analyser_tendance pour la tendance observée.",
+        )
+    v = r["validation"]
+    lines = [
+        f"PRÉVISION (modèle {r['modele']}) — {r['produit']} — {r['zone']}",
+        f"  Dernier prix observé : {r['dernier_prix']} FCFA/kg (semaine du {r['derniere_semaine']}, "
+        f"{r['semaines_observees']} semaines de relevés)",
+    ]
+    for p in r["previsions"]:
+        lines.append(f"  Semaine du {p['semaine_du']} : {p['prix']} FCFA/kg (80 % : {p['bas']}–{p['haut']})")
+    lines.append(f"  Sens attendu sur 4 semaines : {r['sens']} ({r['variation_4_semaines_pct']:+.1f} %)")
+    if v.get("folds"):
+        lines.append(
+            f"  Précision mesurée à {v['horizon_semaines']} semaines sur {v['folds']} essais : erreur moyenne "
+            f"{v['mape']} % (contre {v['mape_naive']} % pour « le prix ne bouge pas »)"
+        )
+    lines.append(f"  Confiance : {r['confiance']}")
+    if r["confiance"] == "faible":
+        lines.append("  ⚠️ Sur cette série, le modèle ne fait pas mieux que « le prix ne bouge pas » : ne pas fonder une décision dessus.")
+    return ToolResponse(content="\n".join(lines))

@@ -96,6 +96,19 @@ def forecast():
         return jsonify({"error": str(e)}), 500
 
 
+@api_bp.route("/forecast/price", methods=["GET", "POST"])
+def forecast_price():
+    """Prévision de prix (4 semaines) d'un produit dans une zone."""
+    try:
+        from app.ml.price_forecast import run_price_forecast
+        body = request.get_json(force=True, silent=True) or {}
+        produit = body.get("produit") or request.args.get("produit") or "Maïs"
+        zone = body.get("zone") or request.args.get("zone") or None
+        return jsonify(_safe(run_price_forecast, produit, zone, save=False))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @api_bp.route("/risk", methods=["POST"])
 def risk():
     try:

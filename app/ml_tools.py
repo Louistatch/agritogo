@@ -38,11 +38,13 @@ async def prevoir_volatilite(produit: str = "Maïs", jours: int = 30) -> ToolRes
         Prévision de volatilité et paramètres du modèle GARCH.
     """
     result = run_garch_forecast(product=produit, periods=jours)
+    if result.get("error"):
+        return ToolResponse(content=result["error"])
     lines = [f"📈 {result['summary']}", ""]
     lines.append(f"Dernier prix: {result['last_price_fcfa']} FCFA/kg")
     stats = result["historical_volatility_stats"]
     lines.append(f"Volatilité annualisée: {stats['current']:.2%}")
-    lines.append(f"\nPrévision {jours} jours (5 premiers):")
+    lines.append(f"\nPrévision par semaine ({len(result['forecast_30d'])} semaines):")
     for f in result["forecast_30d"][:5]:
         lines.append(f"  {f['date']}: vol={f['predicted_volatility']:.4f} "
                      f"[{f['price_lower']}-{f['price_upper']} FCFA]")

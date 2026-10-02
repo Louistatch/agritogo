@@ -1,8 +1,8 @@
-"""GARCH Volatility Forecasting — reads real prices from Supabase.
+"""GARCH Volatility Forecasting — weekly observed prices from Supabase.
 
-When enough real data exists (≥30 price points for a product), the model
-fits on actual market prices. Otherwise it augments with synthetic data
-calibrated on whatever real data is available, and logs a warning.
+The model fits on the weekly median price series (per market, then across
+markets) built by app.ml.price_forecast. No synthetic data is ever added:
+below 12 weeks of observations the function returns an explicit error.
 """
 import logging
 import numpy as np
@@ -91,15 +91,23 @@ def run_garch_forecast(product: str = "Maïs", periods: int = 30) -> dict:
     """Fit GARCH(1,1) on real Supabase prices (augmented if needed)."""
     np.random.seed(42)
 
-    # 1. Load real data from Supabase
-    real_df = _load_from_supabase(product)
-    n_real = len(real_df)
+    # 1. Série hebdomadaire OBSERVÉE (médiane par marché puis entre marchés).
+    #    Plus de données synthétiques : la volatilité des rendements d'une série
+    #    inventée n'informe sur rien, et mélanger les marchés relevé par relevé
+    #    prenait les écarts entre marchés pour des variations de prix.
+    from app.database import _get_client, _resolve_culture
+    from app.ml.price_forecast import load_observations, weekly_series
 
-    # 2. Augment if needed (GARCH needs ≥100 points ideally)
-    data = _augment_synthetic(real_df, product, target_n=200)
-
-    if len(data) < 10:
-        return {"error": f"Pas assez de données pour {product}. Collectez des prix via KoboCollect."}
+    sb = _get_client()
+    culture = _resolve_culture(sb, product)
+    weekly = (
+        weekly_series(load_observations(sb, str(culture["id"]), None, None))
+        if culture else pd.Series(dtype=float)
+    )
+    n_real = len(weekly)
+    if n_real < 12:
+        return {"error": f"Pas assez de relevés hebdomadaires pour {product} ({n_real} semaines, il en faut 12)."}
+    data = pd.DataFrame({"Date": weekly.index, "price_fcfa": weekly.to_numpy(float)})
 
     # 3. Compute returns
     data["returns"] = data["price_fcfa"].pct_change().fillna(0) * 100
@@ -116,15 +124,18 @@ def run_garch_forecast(product: str = "Maïs", periods: int = 30) -> dict:
         model = arch_model(returns_pct, vol="Garch", p=1, q=1, mean="Zero")
         result = model.fit(disp="off")
         params = {k: round(float(v), 6) for k, v in result.params.items()}
-        fc = result.forecast(horizon=periods)
+        weeks = max(1, int(np.ceil(periods / 7)))
+        fc = result.forecast(horizon=weeks)
         vol_forecast = np.sqrt(fc.variance.iloc[-1].values) / 100
     except Exception:
         params = {"omega": 0.0001, "alpha[1]": 0.12, "beta[1]": 0.85}
-        vol_forecast = np.full(periods, float(np.std(returns_pct / 100)))
+        weeks = max(1, int(np.ceil(periods / 7)))
+        vol_forecast = np.full(weeks, float(np.std(returns_pct / 100)))
 
     last_price = float(prices[-1])
     today = datetime.combine(date.today(), datetime.min.time())
-    forecast_dates = [today + timedelta(days=i + 1) for i in range(periods)]
+    # Pas hebdomadaire : le modèle est ajusté sur des rendements de semaine en semaine.
+    forecast_dates = [today + timedelta(days=7 * (i + 1)) for i in range(len(vol_forecast))]
     forecast_30d = [
         {
             "date": d.strftime("%Y-%m-%d"),
@@ -135,18 +146,18 @@ def run_garch_forecast(product: str = "Maïs", periods: int = 30) -> dict:
         for d, v in zip(forecast_dates, vol_forecast)
     ]
 
-    hist_vol = pd.Series(returns_pct / 100).rolling(30).std() * np.sqrt(252)
+    # Annualisation d'une volatilité hebdomadaire : racine de 52 (et non de 252 jours de bourse).
+    hist_vol = pd.Series(returns_pct / 100).rolling(12).std() * np.sqrt(52)
     current_vol = float(hist_vol.dropna().iloc[-1]) if len(hist_vol.dropna()) > 0 else 0.0
 
     return {
         "product": product,
         "data_quality": {
-            "real_prices": n_real,
+            "weekly_points": n_real,
             "total_used": len(data),
-            "source": "supabase" if n_real >= 30 else "supabase+synthetic",
-            "recommendation": None if n_real >= 60 else (
-                f"Seulement {n_real} prix réels. Collectez des prix sur les marchés "
-                f"via KoboCollect pour améliorer la précision."
+            "source": "supabase (médianes hebdomadaires observées)",
+            "recommendation": None if n_real >= 30 else (
+                f"Seulement {n_real} semaines de relevés : volatilité indicative."
             ),
         },
         "model_params": params,
@@ -160,7 +171,7 @@ def run_garch_forecast(product: str = "Maïs", periods: int = 30) -> dict:
         "sma20": round(sma20, 1),
         "rsi14": round(rsi14, 1),
         "summary": (
-            f"GARCH(1,1) sur {n_real} prix réels + {len(data) - n_real} synthétiques pour {product}. "
+            f"GARCH(1,1) sur {n_real} semaines de prix observés pour {product}. "
             f"Volatilité actuelle: {current_vol:.2%}. Dernier prix: {round(last_price, 1)} FCFA."
         ),
     }
