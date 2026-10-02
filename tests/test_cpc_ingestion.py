@@ -2,6 +2,7 @@
 
 from app.ingestion.cpc import (
     culture_candidates,
+    normalize_payload,
     _extract_script_endpoint_hints,
     _same_site,
     normalize_records,
