@@ -20,6 +20,12 @@ from typing import Any
 from app.ingestion.cpc import discover_cpc_source, extract_from_discovery
 
 
+# SIM-CPC publie des prix au kilogramme. Le chemin « endpoint en cache » n'a pas la
+# page sous les yeux pour le lire : sans indication, 711 relevés sortaient avec une
+# unité inconnue (« unknown_unit »).
+CPC_UNIT_HINT = "kg"
+
+
 def _write_json(path: str, payload: object) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -96,7 +102,7 @@ def main() -> int:
         registry = MarketEndpointRegistry(source="SIM-CPC")
         for endpoint in registry.best(limit=5):
             try:
-                observations, extraction = registry.collect(endpoint)
+                observations, extraction = registry.collect(endpoint, unit_hint=CPC_UNIT_HINT)
                 acquisition_attempts.append({
                     "mode": "cached_endpoint",
                     "endpoint": endpoint.get("url"),

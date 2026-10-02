@@ -271,7 +271,14 @@ class MarketIngestionPipeline:
         else:
             score = abs(ratio - 1.0) * 10.0
 
-        suspicious = score > 8.0 or ratio > 2.5 or ratio < 0.4
+        # Un historique très régulier (MAD proche de 0) donne un score énorme pour
+        # un écart minime : 1,07 fois la médiane est classé « aberrant » (score 25).
+        # Le score seul ne suffit donc pas, il faut aussi un écart réel.
+        suspicious = (
+            (score > 8.0 and (ratio > 1.6 or ratio < 0.6))
+            or ratio > 2.5
+            or ratio < 0.4
+        )
         if suspicious:
             reason = (
                 f"robust_outlier: score={score:.2f}, "
@@ -282,17 +289,47 @@ class MarketIngestionPipeline:
         return "normal", round(score, 3), None
 
     def promote(self, run_id: str) -> dict[str, int]:
-        """Promote accepted staged observations when product/market mapping is safe."""
-        staged = (
-            self.sb.table("market_price_staging")
-            .select("*")
-            .eq("run_id", run_id)
-            .eq("quality_status", "accepted")
-            .execute()
-            .data
-            or []
-        )
+        """Promote accepted staged observations when product/market mapping is safe.
 
+        PostgREST plafonne une réponse à 1000 lignes. Au premier passage complet,
+        711 relevés restaient « accepted » sans jamais être lus. On traite donc
+        par lots de 1000 : une ligne traitée quitte l'état « accepted », le lot
+        suivant donne les suivantes. Garde-fous : arrêt si un lot ne fait aucun
+        progrès (même identifiants qu'avant) et plafond de 30 lots.
+        """
+        totals = {
+            "promoted": 0,
+            "unresolved_product": 0,
+            "unresolved_market": 0,
+            "quarantined": 0,
+            "errors": 0,
+        }
+        previous_ids: set[str] = set()
+        for _ in range(30):
+            batch = (
+                self.sb.table("market_price_staging")
+                .select("*")
+                .eq("run_id", run_id)
+                .eq("quality_status", "accepted")
+                .limit(1000)
+                .execute()
+                .data
+                or []
+            )
+            ids = {str(row["id"]) for row in batch}
+            if not batch or ids == previous_ids:
+                break
+            previous_ids = ids
+            result = self._promote_rows(run_id, batch)
+            for key in totals:
+                totals[key] += result.get(key, 0)
+        return totals
+
+    def _promote_rows(
+        self,
+        run_id: str,
+        staged: list[dict[str, Any]],
+    ) -> dict[str, int]:
         aliases = self._aliases()
         cultures = self._cultures()
         regions = self._regions()
