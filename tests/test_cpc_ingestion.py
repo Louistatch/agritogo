@@ -1,6 +1,7 @@
 """Tests for CPC market-data normalization."""
 
 from app.ingestion.cpc import (
+    culture_candidates,
     _extract_script_endpoint_hints,
     _same_site,
     normalize_records,
@@ -178,3 +179,84 @@ def test_wide_headers_preserve_retail_and_wholesale_dimension() -> None:
     assert by_type["retail"].price == 260
     assert by_type["wholesale"].price == 225
     assert all(row.unit == "kg" for row in rows)
+
+
+def test_date_collecte_is_the_observation_date() -> None:
+    """SIM-CPC date son relevé dans `dateCollecte` ; sans elle, le robot
+    inventait la date du jour et présentait un prix de janvier comme frais."""
+    records = [
+        {
+            "marche": "Kaboli",
+            "produit": "Maïs blanc",
+            "prix": "113",
+            "dateCollecte": "03/01/2026",
+            "dateValidation": "2026-01-06 09:38",
+            "dateEnregistrement": "2026-01-03 13:53",
+            "region": "CENTRALE",
+        },
+    ]
+
+    rows = normalize_records(records, "https://www.cpc-togo.com/", unit_hint="kg")
+
+    assert len(rows) == 1
+    assert rows[0].observed_at == "2026-01-03"
+    assert rows[0].quality_status == "accepted"
+    assert "missing_date" not in (rows[0].quality_reason or "")
+
+
+def test_culture_candidates_use_subcategory_then_first_word() -> None:
+    candidates = culture_candidates({
+        "product_raw": "Maïs blanc",
+        "raw_record": {"sousCategorie": "Maïs"},
+    })
+
+    assert candidates == ["maisblanc", "mais", "mais"]
+
+
+def test_fetch_remaining_pages_merges_paginated_feed(monkeypatch) -> None:
+    """L'API SIM-CPC pagine (500 sur 3 482) sans tri : lire la page 0 seule
+    donnait les plus anciens relevés et ratait les récents."""
+    import json
+
+    from app.ingestion import cpc
+
+    pages = {
+        "1": {"content": [{"id": 2}], "totalPages": 3},
+        "2": {"content": [{"id": 3}], "totalPages": 3},
+    }
+    requested: list[str] = []
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, headers=None, timeout=None):
+        page = url.split("page=")[1].split("&")[0]
+        requested.append(page)
+        return _Resp(pages[page])
+
+    monkeypatch.setattr(cpc.requests, "get", fake_get)
+    first = json.dumps({"content": [{"id": 1}], "totalPages": 3, "totalElements": 3})
+
+    merged = json.loads(
+        cpc.fetch_remaining_pages(
+            "https://api.example/x?page=0&size=500", first, headers={}
+        )
+    )
+
+    assert [r["id"] for r in merged["content"]] == [1, 2, 3]
+    assert requested == ["1", "2"]
+
+
+def test_fetch_remaining_pages_leaves_single_page_untouched() -> None:
+    from app.ingestion.cpc import fetch_remaining_pages
+
+    text = '{"content": [{"id": 1}], "totalPages": 1}'
+    assert fetch_remaining_pages("https://api.example/x?page=0", text, headers={}) == text
+    assert fetch_remaining_pages("https://api.example/x", "plain text", headers={}) == "plain text"

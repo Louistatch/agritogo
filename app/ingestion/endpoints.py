@@ -8,7 +8,12 @@ from typing import Any
 import requests
 
 from app.database import get_db
-from app.ingestion.cpc import EndpointCandidate, MarketObservation, normalize_payload
+from app.ingestion.cpc import (
+    EndpointCandidate,
+    MarketObservation,
+    fetch_remaining_pages,
+    normalize_payload,
+)
 
 
 class MarketEndpointRegistry:
@@ -80,6 +85,11 @@ class MarketEndpointRegistry:
         }
         etag = endpoint.get("etag")
         last_modified = endpoint.get("last_modified")
+        # Flux paginé : un 304 sur la page 0 ne dit rien des pages suivantes, où
+        # arrivent les relevés récents. Pas de requête conditionnelle dans ce cas.
+        if "page=" in str(endpoint.get("url", "")):
+            etag = None
+            last_modified = None
         if etag:
             headers["If-None-Match"] = etag
         elif last_modified and endpoint.get("method", "GET").upper() == "GET":
@@ -132,8 +142,16 @@ class MarketEndpointRegistry:
 
         response.raise_for_status()
         content_type = response.headers.get("content-type", "")
+        body = response.text
+        if method == "GET":
+            body = fetch_remaining_pages(
+                endpoint["url"],
+                body,
+                headers=headers,
+                timeout=kwargs["timeout"],
+            )
         observations = normalize_payload(
-            response.text,
+            body,
             content_type,
             response.url,
             source=self.source,
@@ -152,7 +170,7 @@ class MarketEndpointRegistry:
                 "not_modified": False,
                 "status": response.status_code,
                 "content_type": content_type,
-                "raw_text": response.text[:500_000],
+                "raw_text": body[:500_000],
                 "empty": True,
             }
 
@@ -168,7 +186,7 @@ class MarketEndpointRegistry:
             "not_modified": False,
             "status": response.status_code,
             "content_type": content_type,
-            "raw_text": response.text[:500_000],
+            "raw_text": body[:500_000],
         }
 
     def deactivate_if_stale(

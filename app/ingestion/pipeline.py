@@ -11,7 +11,7 @@ from statistics import median
 from typing import Any
 
 from app.database import get_db
-from app.ingestion.cpc import MarketObservation
+from app.ingestion.cpc import MarketObservation, culture_candidates
 
 
 def _norm(value: Any) -> str:
@@ -138,6 +138,26 @@ class MarketIngestionPipeline:
                 "raw_record": obs.raw_record,
             })
 
+        # Un relevé déjà publié ne repart pas en file : sans cela chaque passage
+        # (toutes les 6 h) re-promouvrait des milliers de lignes identiques.
+        published: set[str] = set()
+        hashes = [row["record_hash"] for row in rows]
+        for start in range(0, len(hashes), 200):
+            found = (
+                self.sb.table("market_price_staging")
+                .select("record_hash,quality_status")
+                .in_("record_hash", hashes[start:start + 200])
+                .execute()
+                .data
+                or []
+            )
+            published.update(
+                item["record_hash"]
+                for item in found
+                if item.get("quality_status") == "promoted"
+            )
+        rows = [row for row in rows if row["record_hash"] not in published]
+
         for start in range(0, len(rows), 250):
             chunk = rows[start:start + 250]
             if chunk:
@@ -175,6 +195,11 @@ class MarketIngestionPipeline:
         rows = self.sb.table("cultures").select("id,name").execute().data or []
         return {_norm(row["name"]): row for row in rows}
 
+    def _regions(self) -> dict[str, str]:
+        """Nom de région normalisé -> id (table `regions`, 5 lignes)."""
+        rows = self.sb.table("regions").select("id,name").execute().data or []
+        return {_norm(row["name"]): str(row["id"]) for row in rows}
+
     def _market_regions(self) -> dict[str, str]:
         rows = (
             self.sb.table("market_prices")
@@ -204,21 +229,27 @@ class MarketIngestionPipeline:
         review rather than deleting it. With little history, the record passes
         and receives an "insufficient_history" marker.
         """
-        try:
-            history = (
-                self.sb.table("market_prices")
-                .select("price,unit")
-                .eq("culture_id", culture_id)
-                .eq("market_name", market_name)
-                .eq("data_kind", "observation")
-                .order("observed_at", desc=True)
-                .limit(60)
-                .execute()
-                .data
-                or []
-            )
-        except Exception:
-            return "unchecked", 0.0, "history_query_failed"
+        # Historique lu UNE fois par couple culture / marché pour tout le lot, puis
+        # complété à mesure des publications (milliers de lignes par passage).
+        cache = self.__dict__.setdefault("_history_cache", {})
+        key = (culture_id, market_name)
+        if key not in cache:
+            try:
+                cache[key] = (
+                    self.sb.table("market_prices")
+                    .select("price,unit")
+                    .eq("culture_id", culture_id)
+                    .eq("market_name", market_name)
+                    .eq("data_kind", "observation")
+                    .order("observed_at", desc=True)
+                    .limit(60)
+                    .execute()
+                    .data
+                    or []
+                )
+            except Exception:
+                return "unchecked", 0.0, "history_query_failed"
+        history = cache[key]
 
         comparable = [
             float(row["price"])
@@ -264,10 +295,27 @@ class MarketIngestionPipeline:
 
         aliases = self._aliases()
         cultures = self._cultures()
+        regions = self._regions()
         market_regions = self._market_regions()
+
+        # Contrôle de plausibilité par produit sur le lot : un prix très éloigné
+        # de la médiane de son produit (7 143 F/kg pour du maïs, 33 F/kg pour du
+        # haricot) est presque sûrement un autre conditionnement (sac, tas) ou une
+        # faute de saisie. Il part en revue, il n'est pas publié.
+        by_family: dict[str, list[float]] = {}
+        for item in staged:
+            family = (item.get("product_raw") or "").split()[:1]
+            if family and item.get("price") is not None:
+                by_family.setdefault(_norm(family[0]), []).append(float(item["price"]))
+        medians = {
+            family: median(values)
+            for family, values in by_family.items()
+            if len(values) >= 5
+        }
 
         promoted = unresolved_product = unresolved_market = quarantined = 0
         errors = 0
+        pending: list[tuple[dict[str, Any], dict[str, Any], str, str, str, float]] = []
 
         for row in staged:
             product_norm = _norm(row["product_raw"])
@@ -281,9 +329,12 @@ class MarketIngestionPipeline:
             if product_alias and product_alias.get("culture_id"):
                 culture_id = product_alias["culture_id"]
                 product_name = product_alias.get("canonical_value") or product_name
-            elif product_norm in cultures:
-                culture_id = cultures[product_norm]["id"]
-                product_name = cultures[product_norm]["name"]
+            else:
+                for candidate in culture_candidates(row):
+                    if candidate in cultures:
+                        culture_id = cultures[candidate]["id"]
+                        product_name = cultures[candidate]["name"]
+                        break
 
             region_id = None
             market_name = row["market_raw"]
@@ -292,6 +343,10 @@ class MarketIngestionPipeline:
                 market_name = market_alias.get("canonical_value") or market_name
             if not region_id:
                 region_id = market_regions.get(_norm(market_name))
+            if not region_id and row.get("region_raw"):
+                # La source donne la région (« PLATEAUX ») : on s'en sert pour un
+                # marché encore inconnu plutôt que de le laisser sans région.
+                region_id = regions.get(_norm(row["region_raw"]))
 
             if not culture_id:
                 unresolved_product += 1
@@ -307,6 +362,22 @@ class MarketIngestionPipeline:
                 continue
 
             unit = row.get("unit") or "unknown"
+
+            family_norm = _norm((row.get("product_raw") or "").split()[0]) if (row.get("product_raw") or "").split() else ""
+            family_median = medians.get(family_norm)
+            if family_median and family_median > 0:
+                ratio = float(row["price"]) / family_median
+                if ratio > 3.0 or ratio < 0.35:
+                    quarantined += 1
+                    self._mark_stage(
+                        row["id"],
+                        "needs_review",
+                        f"implausible_vs_batch: ratio_to_median={ratio:.2f}, median={family_median:.0f}",
+                        market_canonical=market_name,
+                        product_canonical=product_name,
+                    )
+                    continue
+
             anomaly_status, anomaly_score, anomaly_reason = self._anomaly_check(
                 str(culture_id),
                 market_name,
@@ -330,10 +401,12 @@ class MarketIngestionPipeline:
                 "culture_id": culture_id,
                 "region_id": region_id,
                 "market_name": market_name,
-                "price": row["price"],
+                "price": round(float(row["price"])),
                 "unit": unit,
                 "currency": row.get("currency") or "FCFA",
-                "verified": True,
+                # Prix d'une source externe : publié mais NON vérifié par la
+                # plateforme. L'application l'affiche avec la mention de sa source.
+                "verified": False,
                 "source": self.source,
                 "source_url": row.get("source_url"),
                 "observed_at": row["observed_at"],
@@ -349,11 +422,36 @@ class MarketIngestionPipeline:
                 "ingestion_run_id": run_id,
             }
 
+            pending.append((row, payload, market_name, product_name, anomaly_status, anomaly_score))
+            # L'historique du lot se complète au fil des publications.
+            self.__dict__.setdefault("_history_cache", {}).setdefault(
+                (str(culture_id), market_name), [],
+            ).append({"price": payload["price"], "unit": unit})
+
+        # Publication par paquets : des milliers de relevés, un appel par paquet
+        # plutôt qu'un par ligne. Si un paquet échoue, on le rejoue ligne à ligne
+        # pour isoler la ligne fautive.
+        for start in range(0, len(pending), 100):
+            chunk = pending[start:start + 100]
+            ok_rows = chunk
             try:
                 self.sb.table("market_prices").upsert(
-                    payload,
+                    [item[1] for item in chunk],
                     on_conflict="source_record_hash",
                 ).execute()
+            except Exception:
+                ok_rows = []
+                for item in chunk:
+                    try:
+                        self.sb.table("market_prices").upsert(
+                            item[1],
+                            on_conflict="source_record_hash",
+                        ).execute()
+                        ok_rows.append(item)
+                    except Exception as exc:
+                        errors += 1
+                        self._mark_stage(item[0]["id"], "error", str(exc)[:500])
+            for row, _payload, market_name, product_name, a_status, a_score in ok_rows:
                 promoted += 1
                 self._mark_stage(
                     row["id"],
@@ -361,12 +459,9 @@ class MarketIngestionPipeline:
                     None,
                     market_canonical=market_name,
                     product_canonical=product_name,
-                    anomaly_status=anomaly_status,
-                    anomaly_score=anomaly_score,
+                    anomaly_status=a_status,
+                    anomaly_score=a_score,
                 )
-            except Exception as exc:
-                errors += 1
-                self._mark_stage(row["id"], "error", str(exc)[:500])
 
         return {
             "promoted": promoted,
