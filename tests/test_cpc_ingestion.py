@@ -1,6 +1,7 @@
 """Tests for CPC market-data normalization."""
 
 from app.ingestion.cpc import (
+    culture_candidates,
     _extract_script_endpoint_hints,
     _same_site,
     normalize_records,
@@ -178,3 +179,35 @@ def test_wide_headers_preserve_retail_and_wholesale_dimension() -> None:
     assert by_type["retail"].price == 260
     assert by_type["wholesale"].price == 225
     assert all(row.unit == "kg" for row in rows)
+
+
+def test_date_collecte_is_the_observation_date() -> None:
+    """SIM-CPC date son relevé dans `dateCollecte` ; sans elle, le robot
+    inventait la date du jour et présentait un prix de janvier comme frais."""
+    records = [
+        {
+            "marche": "Kaboli",
+            "produit": "Maïs blanc",
+            "prix": "113",
+            "dateCollecte": "03/01/2026",
+            "dateValidation": "2026-01-06 09:38",
+            "dateEnregistrement": "2026-01-03 13:53",
+            "region": "CENTRALE",
+        },
+    ]
+
+    rows = normalize_records(records, "https://www.cpc-togo.com/", unit_hint="kg")
+
+    assert len(rows) == 1
+    assert rows[0].observed_at == "2026-01-03"
+    assert rows[0].quality_status == "accepted"
+    assert "missing_date" not in (rows[0].quality_reason or "")
+
+
+def test_culture_candidates_use_subcategory_then_first_word() -> None:
+    candidates = culture_candidates({
+        "product_raw": "Maïs blanc",
+        "raw_record": {"sousCategorie": "Maïs"},
+    })
+
+    assert candidates == ["maisblanc", "mais", "mais"]

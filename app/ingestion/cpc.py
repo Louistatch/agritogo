@@ -36,7 +36,19 @@ MARKET_WORDS = {
     "point_vente",
 }
 PRODUCT_WORDS = {"produit", "product", "culture", "denree", "denrée", "speculation"}
-DATE_WORDS = {"date", "jour", "observedat", "observed_at", "createdat", "created_at"}
+# « dateCollecte » est la date du relevé sur le terrain (SIM-CPC). Les dates
+# d'enregistrement ou de validation viennent plus tard et ne sont PAS celles du prix.
+DATE_WORDS = {
+    "date",
+    "jour",
+    "observedat",
+    "observed_at",
+    "createdat",
+    "created_at",
+    "datecollecte",
+    "datedecollecte",
+    "datecollection",
+}
 UNIT_WORDS = {"unite", "unité", "unit", "conditionnement"}
 CURRENCY_WORDS = {"devise", "currency", "monnaie"}
 PRICE_TYPE_WORDS = {"typeprix", "type_prix", "pricetype", "price_type", "niveau", "vente"}
@@ -134,6 +146,24 @@ def _iso_date(value: Any) -> str | None:
         return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
     except ValueError:
         return None
+
+
+def culture_candidates(row: dict[str, Any]) -> list[str]:
+    """Noms normalisés sous lesquels chercher la culture, du plus précis au plus large.
+
+    SIM-CPC publie « Maïs blanc », « Riz paddy »… alors que la table `cultures`
+    porte « Mais », « Riz ». On essaie le nom complet, la sous-catégorie fournie
+    par la source, puis le premier mot.
+    """
+    raw = row.get("raw_record") or {}
+    product = str(row.get("product_raw") or "")
+    names = [product]
+    if isinstance(raw, dict):
+        names.append(str(raw.get("sousCategorie") or ""))
+    words = product.split()
+    if words:
+        names.append(words[0])
+    return [_norm(name) for name in names if name]
 
 
 def _hash_record(*parts: Any) -> str:
