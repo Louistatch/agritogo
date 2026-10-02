@@ -23,7 +23,7 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       PYTHONPATH: .
       CPC_URL: https://www.cpc-togo.com/prixproduit

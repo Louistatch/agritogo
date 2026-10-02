@@ -21,7 +21,7 @@ from html.parser import HTMLParser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunsplit
 
 import requests
 
@@ -792,6 +792,61 @@ async def discover_cpc_source(
         currency_hint="FCFA",
     )
 
+MAX_FEED_PAGES = 40
+
+
+def fetch_remaining_pages(
+    url: str,
+    first_text: str,
+    *,
+    headers: dict[str, str],
+    timeout: int = 30,
+    max_pages: int = MAX_FEED_PAGES,
+) -> str:
+    """Complète un flux JSON paginé (Spring : `content`, `totalPages`).
+
+    L'API SIM-CPC (`.../getAllValidation?page=0&size=500`) renvoie 500 relevés
+    sur 3 482, sans tri. Lire la seule page 0 donnait les plus anciens (janvier)
+    et ratait tout le reste. On récupère donc les pages suivantes et on rend un
+    JSON unique `{"content": [...]}`. Hors flux paginé, le texte est rendu tel quel.
+    """
+    try:
+        first = json.loads(first_text)
+    except (TypeError, ValueError):
+        return first_text
+    if not isinstance(first, dict) or not isinstance(first.get("content"), list):
+        return first_text
+    total_pages = first.get("totalPages")
+    if not isinstance(total_pages, int) or total_pages <= 1:
+        return first_text
+
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    if "page" not in query:
+        return first_text
+
+    records = list(first["content"])
+    for page in range(1, min(total_pages, max_pages)):
+        query["page"] = str(page)
+        page_url = urlunsplit(parts._replace(query=urlencode(query)))
+        response = requests.get(page_url, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        payload = response.json()
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not isinstance(content, list):
+            break
+        records.extend(content)
+    return json.dumps(
+        {
+            "content": records,
+            "totalElements": first.get("totalElements"),
+            "totalPages": total_pages,
+            "pagesFetched": min(total_pages, max_pages),
+        },
+        ensure_ascii=False,
+    )
+
+
 def fetch_candidate(candidate: dict[str, Any], timeout: int = 30) -> tuple[str, str]:
     """Fetch a discovered public endpoint directly after browser discovery."""
     url = candidate["url"]
@@ -814,7 +869,10 @@ def fetch_candidate(candidate: dict[str, Any], timeout: int = 30) -> tuple[str, 
 
     response = requests.request(method, url, **kwargs)
     response.raise_for_status()
-    return response.text, response.headers.get("content-type", "")
+    text = response.text
+    if method == "GET":
+        text = fetch_remaining_pages(url, text, headers=headers, timeout=timeout)
+    return text, response.headers.get("content-type", "")
 
 
 

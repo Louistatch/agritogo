@@ -138,6 +138,26 @@ class MarketIngestionPipeline:
                 "raw_record": obs.raw_record,
             })
 
+        # Un relevé déjà publié ne repart pas en file : sans cela chaque passage
+        # (toutes les 6 h) re-promouvrait des milliers de lignes identiques.
+        published: set[str] = set()
+        hashes = [row["record_hash"] for row in rows]
+        for start in range(0, len(hashes), 200):
+            found = (
+                self.sb.table("market_price_staging")
+                .select("record_hash,quality_status")
+                .in_("record_hash", hashes[start:start + 200])
+                .execute()
+                .data
+                or []
+            )
+            published.update(
+                item["record_hash"]
+                for item in found
+                if item.get("quality_status") == "promoted"
+            )
+        rows = [row for row in rows if row["record_hash"] not in published]
+
         for start in range(0, len(rows), 250):
             chunk = rows[start:start + 250]
             if chunk:
@@ -209,21 +229,27 @@ class MarketIngestionPipeline:
         review rather than deleting it. With little history, the record passes
         and receives an "insufficient_history" marker.
         """
-        try:
-            history = (
-                self.sb.table("market_prices")
-                .select("price,unit")
-                .eq("culture_id", culture_id)
-                .eq("market_name", market_name)
-                .eq("data_kind", "observation")
-                .order("observed_at", desc=True)
-                .limit(60)
-                .execute()
-                .data
-                or []
-            )
-        except Exception:
-            return "unchecked", 0.0, "history_query_failed"
+        # Historique lu UNE fois par couple culture / marché pour tout le lot, puis
+        # complété à mesure des publications (milliers de lignes par passage).
+        cache = self.__dict__.setdefault("_history_cache", {})
+        key = (culture_id, market_name)
+        if key not in cache:
+            try:
+                cache[key] = (
+                    self.sb.table("market_prices")
+                    .select("price,unit")
+                    .eq("culture_id", culture_id)
+                    .eq("market_name", market_name)
+                    .eq("data_kind", "observation")
+                    .order("observed_at", desc=True)
+                    .limit(60)
+                    .execute()
+                    .data
+                    or []
+                )
+            except Exception:
+                return "unchecked", 0.0, "history_query_failed"
+        history = cache[key]
 
         comparable = [
             float(row["price"])
@@ -289,6 +315,7 @@ class MarketIngestionPipeline:
 
         promoted = unresolved_product = unresolved_market = quarantined = 0
         errors = 0
+        pending: list[tuple[dict[str, Any], dict[str, Any], str, str, str, float]] = []
 
         for row in staged:
             product_norm = _norm(row["product_raw"])
@@ -395,11 +422,36 @@ class MarketIngestionPipeline:
                 "ingestion_run_id": run_id,
             }
 
+            pending.append((row, payload, market_name, product_name, anomaly_status, anomaly_score))
+            # L'historique du lot se complète au fil des publications.
+            self.__dict__.setdefault("_history_cache", {}).setdefault(
+                (str(culture_id), market_name), [],
+            ).append({"price": payload["price"], "unit": unit})
+
+        # Publication par paquets : des milliers de relevés, un appel par paquet
+        # plutôt qu'un par ligne. Si un paquet échoue, on le rejoue ligne à ligne
+        # pour isoler la ligne fautive.
+        for start in range(0, len(pending), 100):
+            chunk = pending[start:start + 100]
+            ok_rows = chunk
             try:
                 self.sb.table("market_prices").upsert(
-                    payload,
+                    [item[1] for item in chunk],
                     on_conflict="source_record_hash",
                 ).execute()
+            except Exception:
+                ok_rows = []
+                for item in chunk:
+                    try:
+                        self.sb.table("market_prices").upsert(
+                            item[1],
+                            on_conflict="source_record_hash",
+                        ).execute()
+                        ok_rows.append(item)
+                    except Exception as exc:
+                        errors += 1
+                        self._mark_stage(item[0]["id"], "error", str(exc)[:500])
+            for row, _payload, market_name, product_name, a_status, a_score in ok_rows:
                 promoted += 1
                 self._mark_stage(
                     row["id"],
@@ -407,12 +459,9 @@ class MarketIngestionPipeline:
                     None,
                     market_canonical=market_name,
                     product_canonical=product_name,
-                    anomaly_status=anomaly_status,
-                    anomaly_score=anomaly_score,
+                    anomaly_status=a_status,
+                    anomaly_score=a_score,
                 )
-            except Exception as exc:
-                errors += 1
-                self._mark_stage(row["id"], "error", str(exc)[:500])
 
         return {
             "promoted": promoted,

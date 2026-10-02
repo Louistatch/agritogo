@@ -211,3 +211,52 @@ def test_culture_candidates_use_subcategory_then_first_word() -> None:
     })
 
     assert candidates == ["maisblanc", "mais", "mais"]
+
+
+def test_fetch_remaining_pages_merges_paginated_feed(monkeypatch) -> None:
+    """L'API SIM-CPC pagine (500 sur 3 482) sans tri : lire la page 0 seule
+    donnait les plus anciens relevés et ratait les récents."""
+    import json
+
+    from app.ingestion import cpc
+
+    pages = {
+        "1": {"content": [{"id": 2}], "totalPages": 3},
+        "2": {"content": [{"id": 3}], "totalPages": 3},
+    }
+    requested: list[str] = []
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, headers=None, timeout=None):
+        page = url.split("page=")[1].split("&")[0]
+        requested.append(page)
+        return _Resp(pages[page])
+
+    monkeypatch.setattr(cpc.requests, "get", fake_get)
+    first = json.dumps({"content": [{"id": 1}], "totalPages": 3, "totalElements": 3})
+
+    merged = json.loads(
+        cpc.fetch_remaining_pages(
+            "https://api.example/x?page=0&size=500", first, headers={}
+        )
+    )
+
+    assert [r["id"] for r in merged["content"]] == [1, 2, 3]
+    assert requested == ["1", "2"]
+
+
+def test_fetch_remaining_pages_leaves_single_page_untouched() -> None:
+    from app.ingestion.cpc import fetch_remaining_pages
+
+    text = '{"content": [{"id": 1}], "totalPages": 1}'
+    assert fetch_remaining_pages("https://api.example/x?page=0", text, headers={}) == text
+    assert fetch_remaining_pages("https://api.example/x", "plain text", headers={}) == "plain text"
