@@ -14,6 +14,15 @@ from app.database import get_db
 from app.ingestion.cpc import MarketObservation, culture_candidates
 
 
+# Régions administratives de la source qui ne sont pas l'une des 5 régions de la
+# plateforme. DAGL = District Autonome du Grand Lomé, rattaché à la région Maritime.
+_REGION_SYNONYMS = {
+    "dagl": "maritime",
+    "grandlome": "maritime",
+    "lome": "maritime",
+}
+
+
 def _norm(value: Any) -> str:
     text = unicodedata.normalize("NFKD", "" if value is None else str(value))
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
@@ -274,11 +283,11 @@ class MarketIngestionPipeline:
         # Un historique très régulier (MAD proche de 0) donne un score énorme pour
         # un écart minime : 1,07 fois la médiane est classé « aberrant » (score 25).
         # Le score seul ne suffit donc pas, il faut aussi un écart réel.
-        suspicious = (
-            (score > 8.0 and (ratio > 1.6 or ratio < 0.6))
-            or ratio > 2.5
-            or ratio < 0.4
-        )
+        # Seul un écart réel à la médiane (x2,5 ou /2,5) est suspect. Le score
+        # robuste reste enregistré à titre indicatif : sur un historique très
+        # régulier ou très court il s'emballe pour des variations normales
+        # (1,9 fois la médiane = un marché plus cher, pas une erreur).
+        suspicious = ratio > 2.5 or ratio < 0.4
         if suspicious:
             reason = (
                 f"robust_outlier: score={score:.2f}, "
@@ -383,7 +392,10 @@ class MarketIngestionPipeline:
             if not region_id and row.get("region_raw"):
                 # La source donne la région (« PLATEAUX ») : on s'en sert pour un
                 # marché encore inconnu plutôt que de le laisser sans région.
-                region_id = regions.get(_norm(row["region_raw"]))
+                region_key = _norm(row["region_raw"])
+                region_id = regions.get(region_key) or regions.get(
+                    _REGION_SYNONYMS.get(region_key, ""),
+                )
 
             if not culture_id:
                 unresolved_product += 1
