@@ -65,15 +65,10 @@ def get_prix_historiques(produit_nom: str, marche: str = None, limit: int = 60) 
     """
     sb = _get_client()
 
-    cultures = sb.table("cultures").select("id, name").execute().data or []
-    culture_id = None
-    produit_clean = produit_nom.lower().replace("ï", "i").replace("é", "e").replace("è", "e").strip()
-    for culture in cultures:
-        c_clean = culture["name"].lower().replace("ï", "i").replace("é", "e").replace("è", "e")
-        if c_clean == produit_clean or produit_clean in c_clean:
-            culture_id = culture["id"]
-            produit_nom = culture["name"]
-            break
+    culture = _resolve_culture(sb, produit_nom)
+    culture_id = culture["id"] if culture else None
+    if culture:
+        produit_nom = culture["name"]
 
     if not culture_id:
         return []
@@ -141,10 +136,84 @@ def get_prix_historiques(produit_nom: str, marche: str = None, limit: int = 60) 
     return observations
 
 def get_marches() -> list[str]:
-    """List all distinct market names."""
+    """List all distinct market names.
+
+    Read from the shared view: a plain select on market_prices is capped at
+    1000 rows by PostgREST and silently dropped markets once CPC data arrived.
+    """
     sb = _get_client()
-    res = sb.table("market_prices").select("market_name").execute()
+    try:
+        rows = (
+            sb.table("market_price_scoped")
+            .select("markets")
+            .eq("scope", "region")
+            .execute()
+            .data
+            or []
+        )
+        names = {m for r in rows for m in (r.get("markets") or []) if m}
+        if names:
+            return sorted(names)
+    except Exception:
+        pass
+    res = sb.table("market_prices").select("market_name").limit(5000).execute()
     return sorted(set(r["market_name"] for r in (res.data or []) if r.get("market_name")))
+
+
+def _norm_name(value: str | None) -> str:
+    import re
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", value or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _resolve_culture(sb, produit_nom: str) -> dict | None:
+    """Exact name first ("Riz" must not become "Riz paddy"), then prefix."""
+    cultures = sb.table("cultures").select("id, name").execute().data or []
+    wanted = _norm_name(produit_nom)
+    exact = [c for c in cultures if _norm_name(c["name"]) == wanted]
+    if exact:
+        return exact[0]
+    partial = sorted(
+        (c for c in cultures if wanted and (wanted in _norm_name(c["name"]) or _norm_name(c["name"]) in wanted)),
+        key=lambda c: len(c["name"]),
+    )
+    return partial[0] if partial else None
+
+
+def get_tendance_zone(produit_nom: str, zone: str | None = None) -> list[dict]:
+    """Current price and 21-day trend of a product, from market_price_scoped.
+
+    Same numbers as the FaîtiereHub price screen: observations deduplicated,
+    median per market then per zone, trend = current 21-day window against the
+    42 days before (±3 %), weekly medians for the curve.
+
+    zone: a region, prefecture or canton name ("Kara", "Binah", "Kétao").
+    Empty: one line per region.
+    """
+    sb = _get_client()
+    culture = _resolve_culture(sb, produit_nom)
+    if not culture:
+        return []
+    rows = (
+        sb.table("market_price_scoped")
+        .select("*")
+        .eq("culture_id", culture["id"])
+        .execute()
+        .data
+        or []
+    )
+    if zone:
+        key = _norm_name(zone)
+        exact = [r for r in rows if _norm_name(r.get("scope_name")) == key]
+        rows = exact or [r for r in rows if key and key in _norm_name(r.get("scope_name"))]
+    else:
+        rows = [r for r in rows if r.get("scope") == "region"]
+    order = {"canton": 0, "prefecture": 1, "region": 2}
+    rows.sort(key=lambda r: (order.get(r.get("scope"), 3), r.get("age_days") or 0))
+    return rows
 
 
 def get_latest_prices() -> list[dict]:
