@@ -69,6 +69,20 @@ def main() -> int:
         os.getenv("SUPABASE_URL")
         and os.getenv("SUPABASE_SERVICE_KEY")
     )
+
+    # Sans secrets Supabase, une exécution NON test ne peut rien enregistrer. Elle
+    # réussissait pourtant (bonus : le scraping trouvait des prix), si bien que le
+    # workflow planifié restait vert pendant que la base ne recevait rien. On
+    # échoue d'emblée et bruyamment ; seul --dry-run (PR) tourne sans secrets.
+    if not has_supabase and not args.dry_run:
+        print(
+            "ERREUR : SUPABASE_URL et/ou SUPABASE_SERVICE_KEY manquants. "
+            "Rien ne serait enregistré. Définissez ces secrets du dépôt "
+            "(Settings > Secrets and variables > Actions) ou utilisez --dry-run.",
+            file=sys.stderr,
+        )
+        return 3
+
     registry = None
     observations = []
     extraction: dict[str, Any] = {}
@@ -178,10 +192,6 @@ def main() -> int:
     }
 
     if args.dry_run or not has_supabase:
-        if not has_supabase and not args.dry_run:
-            summary["persistence"]["warning"] = (
-                "Supabase secrets missing; switched to dry-run."
-            )
         _write_json(args.report, summary)
         print(json.dumps(summary["counts"], ensure_ascii=False))
         print(f"Report: {args.report}")
