@@ -363,11 +363,7 @@ def get_market_overview(produit_nom: str, limit: int = 500) -> list[dict]:
 
 def save_prevision(produit_nom: str, marche: str, prix_prevu: float,
                    date_cible: str, confiance: float = 0.7):
-    """Save a forecast separately from observed market prices.
-
-    Uses market_price_forecasts after the migration is applied, with a safe
-    legacy fallback so current deployments keep working.
-    """
+    """Save a forecast in market_price_forecasts, never in market_prices."""
     sb = _get_client()
     cultures = sb.table("cultures").select("id, name").execute().data or []
     culture_id = None
@@ -389,30 +385,19 @@ def save_prevision(produit_nom: str, marche: str, prix_prevu: float,
     if not region_id:
         return
 
-    try:
-        sb.table("market_price_forecasts").insert({
-            "culture_id": culture_id,
-            "region_id": region_id,
-            "market_name": marche,
-            "forecast_price": int(prix_prevu),
-            "target_date": date_cible,
-            "confidence": float(confiance),
-            "unit": "kg",
-            "currency": "FCFA",
-            "model": "agritogo",
-        }).execute()
-    except Exception:
-        # Compatibility fallback until the migration is deployed.
-        sb.table("market_prices").insert({
-            "culture_id": culture_id,
-            "region_id": region_id,
-            "market_name": marche,
-            "price": int(prix_prevu),
-            "unit": "kg",
-            "currency": "FCFA",
-            "verified": False,
-        }).execute()
-
+    # Une prévision ne va JAMAIS dans market_prices : elle y serait lue comme un
+    # prix observé (par l'application, la vue partagée et les modèles).
+    sb.table("market_price_forecasts").insert({
+        "culture_id": culture_id,
+        "region_id": region_id,
+        "market_name": marche,
+        "forecast_price": int(prix_prevu),
+        "target_date": date_cible,
+        "confidence": float(confiance),
+        "unit": "kg",
+        "currency": "FCFA",
+        "model": "agritogo",
+    }).execute()
 
 
 # ─── Conversations (AI chat history) ──────────────────────────────

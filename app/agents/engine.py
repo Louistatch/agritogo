@@ -22,7 +22,7 @@ from app.agents.prompts import (
 from app.agents.router import route_query, should_debate, select_model
 from app.tools import (
     consulter_prix, lister_produits, lister_marches,
-    enregistrer_prevision, analyser_tendance,
+    enregistrer_prevision, analyser_tendance, prevoir_prix,
 )
 from app.ml_tools import (
     predire_rendement_cultures, prevoir_volatilite,
@@ -33,6 +33,13 @@ from app.kobo_tools import (
     consulter_donnees_terrain, analyser_collecte_terrain,
     generer_formulaire_prix, generer_formulaire_agriculteur,
 )
+
+# Réponse renvoyée quand le modèle de langage refuse faute de quota. C'est CE
+# texte, et lui seul, qui signale une indisponibilité : on ne cherche plus « ⚠️ »
+# ou « indisponible » dans la réponse — un conseil normal contient souvent ces
+# mots (« ⚠️ relevé ancien », « données de coût indisponibles ») et était pris
+# pour une panne (« Le service est temporairement surchargé »).
+QUOTA_MESSAGE = "⚠️ Service temporairement indisponible (quota atteint). Réessayez dans 60 secondes."
 
 # Agent registry  (key: "{agent_type}_{model_name}")
 _agents = {}
@@ -55,8 +62,8 @@ def _build_toolkit(tool_set="all"):
         return None
     toolkit = Toolkit()
     market_tools = [consulter_prix, lister_produits, lister_marches,
-                    enregistrer_prevision, analyser_tendance]
-    ml_tools = [predire_rendement_cultures, prevoir_volatilite,
+                    enregistrer_prevision, analyser_tendance, prevoir_prix]
+    ml_tools = [prevoir_prix, predire_rendement_cultures, prevoir_volatilite,
                 obtenir_kpi_agriculture, consulter_meteo_region, rafraichir_donnees_climat]
     risk_tools = [evaluer_risque_financier, segmenter_agriculteurs,
                   prevoir_volatilite, consulter_meteo_region]
@@ -178,7 +185,7 @@ async def _call_agent(agent_type: str, question: str, model_name: str = None) ->
                         return "[🔄 Clé DeepSeek rotée] " + response.get_text_content()
                     except Exception:
                         continue
-            return "⚠️ Service temporairement indisponible (quota atteint). Réessayez dans 60 secondes."
+            return QUOTA_MESSAGE
         raise
 
 
@@ -243,9 +250,8 @@ async def process_query(question: str, audience: str = "farmer") -> dict:
             result["response"] = raw_response
 
         # Detect model errors before passing to UX agent
-        if raw_response and ("⚠️" in raw_response or "indisponible" in raw_response
-                            or "quota" in raw_response.lower()):
-            result["error"] = raw_response
+        if not raw_response or raw_response.strip() == QUOTA_MESSAGE:
+            result["error"] = raw_response or "réponse vide"
             result["formatted_response"] = (
                 "🔧 Le service est temporairement surchargé. "
                 "Veuillez réessayer dans quelques secondes. "
