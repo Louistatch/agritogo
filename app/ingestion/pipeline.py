@@ -16,6 +16,9 @@ from app.ingestion.cpc import MarketObservation, culture_candidates
 
 # Régions administratives de la source qui ne sont pas l'une des 5 régions de la
 # plateforme. DAGL = District Autonome du Grand Lomé, rattaché à la région Maritime.
+# Orthographes du « département » (= préfecture) de la source qui diffèrent de la table.
+_PREFECTURE_SYNONYMS = {"tandjouare": "tandjoare"}
+
 _REGION_SYNONYMS = {
     "dagl": "maritime",
     "grandlome": "maritime",
@@ -209,6 +212,77 @@ class MarketIngestionPipeline:
         rows = self.sb.table("regions").select("id,name").execute().data or []
         return {_norm(row["name"]): str(row["id"]) for row in rows}
 
+    def _geo_tables(self) -> dict[str, Any]:
+        """Préfectures et cantons de la plateforme, pour situer un marché."""
+        prefectures = (
+            self.sb.table("prefectures").select("id,name,region_id").execute().data or []
+        )
+        cantons = (
+            self.sb.table("cantons").select("id,name,prefecture_id").execute().data or []
+        )
+        return {
+            "prefectures": {_norm(p["name"]): p for p in prefectures},
+            "prefecture_by_id": {str(p["id"]): p for p in prefectures},
+            "cantons": cantons,
+        }
+
+    def _resolve_geo(
+        self,
+        row: dict[str, Any],
+        geo: dict[str, Any],
+    ) -> tuple[str | None, str | None, str | None]:
+        """(préfecture, canton, région) d'un relevé, d'après le découpage de la source.
+
+        La source donne région / département / commune / localité pour chaque
+        relevé. Le canton se cherche par le nom du MARCHÉ puis de la commune
+        (jamais par la « localité », saisie de façon peu fiable : « Kara » pour
+        Kémérida). Un marché sans canton connu en reçoit un, rattaché à sa
+        préfecture. La hiérarchie de la plateforme fait foi : préfecture et région
+        suivent le canton retrouvé.
+        """
+        raw = row.get("raw_record") or {}
+        if not isinstance(raw, dict):
+            return None, None, None
+        dep_key = _norm(raw.get("departement"))
+        dep_key = _PREFECTURE_SYNONYMS.get(dep_key, dep_key)
+        pref = geo["prefectures"].get(dep_key)
+        pref_id = str(pref["id"]) if pref else None
+
+        market = row.get("market_raw") or raw.get("marche") or ""
+        wanted = [_norm(market), _norm(raw.get("commune"))]
+        canton = None
+        for key in wanted:
+            if not key:
+                continue
+            matches = [c for c in geo["cantons"] if _norm(c["name"]) == key]
+            if matches:
+                canton = next(
+                    (c for c in matches if str(c["prefecture_id"]) == pref_id),
+                    matches[0],
+                )
+                break
+
+        if canton is None and pref_id and market:
+            name = market if market != market.upper() else market.title()
+            try:
+                created = (
+                    self.sb.table("cantons")
+                    .insert({"prefecture_id": pref_id, "name": name})
+                    .execute()
+                    .data
+                )
+                if created:
+                    canton = created[0]
+                    geo["cantons"].append(canton)
+            except Exception:
+                canton = None
+
+        if canton is not None:
+            pref_id = str(canton["prefecture_id"])
+        final_pref = geo["prefecture_by_id"].get(pref_id or "")
+        region_id = str(final_pref["region_id"]) if final_pref else None
+        return pref_id, (str(canton["id"]) if canton else None), region_id
+
     def _market_regions(self) -> dict[str, str]:
         rows = (
             self.sb.table("market_prices")
@@ -343,6 +417,10 @@ class MarketIngestionPipeline:
         cultures = self._cultures()
         regions = self._regions()
         market_regions = self._market_regions()
+        try:
+            geo = self._geo_tables()
+        except Exception:
+            geo = None
 
         # Contrôle de plausibilité par produit sur le lot : un prix très éloigné
         # de la médiane de son produit (7 143 F/kg pour du maïs, 33 F/kg pour du
@@ -470,6 +548,14 @@ class MarketIngestionPipeline:
                 "anomaly_status": anomaly_status,
                 "ingestion_run_id": run_id,
             }
+            if geo is not None:
+                pref_id, canton_id, geo_region = self._resolve_geo(row, geo)
+                if pref_id:
+                    payload["prefecture_id"] = pref_id
+                if canton_id:
+                    payload["canton_id"] = canton_id
+                if geo_region:
+                    payload["region_id"] = geo_region
 
             pending.append((row, payload, market_name, product_name, anomaly_status, anomaly_score))
             # L'historique du lot se complète au fil des publications.
