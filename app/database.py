@@ -111,9 +111,14 @@ def get_prix_historiques(produit_nom: str, marche: str = None, limit: int = 60) 
     for row in rows:
         # Legacy forecasts were written into market_prices with verified=False.
         # New forecasts live in market_price_forecasts and must never leak here.
-        if row.get("verified") is False:
-            continue
-        if extended and (row.get("data_kind") or "observation") == "forecast":
+        # Once the schema carries `data_kind`, that column is the authority: a
+        # published external observation (SIM-CPC, verified=False because the
+        # platform did not check it) is an observation, not a forecast. Without
+        # the column we keep the old, conservative rule.
+        if extended:
+            if (row.get("data_kind") or "observation") == "forecast":
+                continue
+        elif row.get("verified") is False:
             continue
 
         observed_at = (row.get("observed_at") if extended else None) or row.get("created_at") or ""
@@ -143,15 +148,47 @@ def get_marches() -> list[str]:
 
 
 def get_latest_prices() -> list[dict]:
-    """Get the latest observed price per product.
+    """Current price per product, from the shared `market_price_current` view.
 
-    Delta is calculated against the previous observation from the SAME market,
-    avoiding misleading cross-market comparisons.
+    One source of truth for the app and AgriTogo: the view deduplicates the
+    observations, takes a two-level median (per market, then per region) and
+    computes the trend over a 21-day window. Per product we keep the region
+    with the freshest and best-covered series.
     """
+    sb = _get_client()
+    try:
+        rows = sb.table("market_price_current").select("*").execute().data or []
+    except Exception:
+        return _get_latest_prices_legacy()
+
+    best: dict[str, dict] = {}
+    for row in rows:
+        name = row.get("culture_name") or "?"
+        key = (-(row.get("age_days") or 0), row.get("n_markets") or 0, row.get("n_obs") or 0)
+        if name not in best or key > best[name]["_key"]:
+            best[name] = {"_key": key, **row}
+
+    out = []
+    for name, row in best.items():
+        out.append({
+            "nom": name,
+            "prix": int(row["price"]),
+            "marche": row.get("region_name"),
+            "date": str(row.get("last_observed") or "")[:10],
+            "delta": float(row["change_pct"]) if row.get("change_pct") is not None else 0.0,
+            "tendance": row.get("trend"),
+            "marches": row.get("n_markets"),
+            "observations": row.get("n_obs"),
+        })
+    return sorted(out, key=lambda x: x["nom"])
+
+
+def _get_latest_prices_legacy() -> list[dict]:
+    """Former per-row computation, kept only if the view is not available."""
     sb = _get_client()
     res = (
         sb.table("market_prices")
-        .select("market_name, price, created_at, verified, culture:cultures(name)")
+        .select("market_name, price, created_at, data_kind, culture:cultures(name)")
         .order("created_at", desc=True)
         .limit(800)
         .execute()
@@ -160,7 +197,7 @@ def get_latest_prices() -> list[dict]:
     from collections import defaultdict
     by_product: dict[str, list[dict]] = defaultdict(list)
     for row in (res.data or []):
-        if row.get("verified") is False:
+        if (row.get("data_kind") or "observation") == "forecast":
             continue
         culture = row.get("culture", {})
         if isinstance(culture, list):
