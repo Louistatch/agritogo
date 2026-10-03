@@ -213,6 +213,39 @@ def _agrismart_details_allowed() -> bool:
     return hmac.compare_digest(given.encode(), expected.encode())
 
 
+@api_bp.route("/yield/estimate", methods=["GET", "POST"])
+def yield_estimate():
+    """Rendement attendu (FAO-33 relatif) — voir app/agrismart/yield_estimate.py.
+
+    Paramètres : crop, region | (lat, lon), soil_type, irrigation,
+    planting_month, area_ha.
+    """
+    try:
+        from app.agrismart.yield_estimate import estimate
+
+        p = request.get_json(silent=True) if request.method == "POST" else request.args
+        p = p or {}
+
+        def num(key):
+            try:
+                return float(p.get(key)) if p.get(key) not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
+
+        return jsonify(estimate(
+            p.get("crop", ""),
+            region=p.get("region"),
+            lat=num("lat"),
+            lon=num("lon"),
+            soil_type=p.get("soil_type"),
+            irrigation=p.get("irrigation"),
+            planting_month=p.get("planting_month"),
+            area_ha=num("area_ha"),
+        ))
+    except Exception:
+        return jsonify({"ok": False, "reason": "estimation indisponible"}), 503
+
+
 @api_bp.route("/agrismart/calculate", methods=["POST"])
 def agrismart_calculate():
     """

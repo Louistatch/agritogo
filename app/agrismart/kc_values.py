@@ -46,6 +46,14 @@ CROPS = {
     "Aubergine": {"emoji": "🍆", "stages": (30, 40, 40, 20), "kc": (0.60, 1.05, 0.90), "zr": (0.25, 0.70), "p": 0.45},
     "Gombo":     {"emoji": "🌿", "stages": (25, 30, 40, 20), "kc": (0.50, 1.00, 0.80), "zr": (0.20, 0.40), "p": 0.40},
     "Pastèque":  {"emoji": "🍉", "stages": (20, 30, 30, 30), "kc": (0.40, 1.00, 0.75), "zr": (0.30, 0.80), "p": 0.40},
+    # Grandes cultures pluviales (FAO-56 tableaux 11, 12, 22 ; lignes Afrique /
+    # tropiques quand elles existent) — utilisées par l'estimation de rendement.
+    "Maïs":      {"emoji": "🌽", "stages": (20, 35, 40, 30), "kc": (0.30, 1.20, 0.60), "zr": (0.30, 1.00), "p": 0.55},
+    "Sorgho":    {"emoji": "🌾", "stages": (20, 35, 40, 30), "kc": (0.30, 1.05, 0.55), "zr": (0.30, 1.00), "p": 0.55},
+    "Mil":       {"emoji": "🌾", "stages": (15, 25, 40, 25), "kc": (0.30, 1.00, 0.30), "zr": (0.30, 1.00), "p": 0.55},
+    "Soja":      {"emoji": "🫘", "stages": (15, 15, 40, 15), "kc": (0.40, 1.15, 0.50), "zr": (0.30, 0.80), "p": 0.50},
+    "Arachide":  {"emoji": "🥜", "stages": (25, 35, 45, 25), "kc": (0.40, 1.15, 0.60), "zr": (0.30, 0.50), "p": 0.50},
+    "Niébé":     {"emoji": "🫘", "stages": (20, 30, 30, 20), "kc": (0.40, 1.05, 0.60), "zr": (0.30, 0.60), "p": 0.45},
 }
 
 
