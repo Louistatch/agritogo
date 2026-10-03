@@ -225,6 +225,10 @@ def agrismart_calculate():
         lat         = body.get("lat")
         lon         = body.get("lon")
         region      = body.get("region")
+        from app.agrismart.kc_values import DEFAULT_PLANTING, MOIS as _MOIS
+        planting    = body.get("planting_month") or DEFAULT_PLANTING
+        if planting not in _MOIS:
+            return jsonify({"error": f"Mois de repiquage inconnu: {planting}"}), 400
 
         # Validations
         if soil_name not in SOIL_PROFILES:
@@ -250,9 +254,13 @@ def agrismart_calculate():
         for c in crops_input:
             crop_name = c["name"]
             area_m2   = max(float(c.get("area_m2", 1000)), 1.0)
-            monthly   = compute_monthly_needs(crop_name, area_m2, soil_ru, system_name, climate)
+            crop_planting = c.get("planting_month") or planting
+            if crop_planting not in _MOIS:
+                return jsonify({"error": f"Mois de repiquage inconnu: {crop_planting}"}), 400
+            monthly   = compute_monthly_needs(crop_name, area_m2, soil_ru, system_name, climate, crop_planting)
             kpis      = compute_kpis(monthly, area_m2, system_name, crop_name)
             results.append({
+                "planting_month": crop_planting,
                 "crop":    crop_name,
                 "area_m2": area_m2,
                 "monthly": monthly,
@@ -260,7 +268,8 @@ def agrismart_calculate():
             })
 
         # Agrégation combinée (12 mois, toutes cultures)
-        from app.agrismart.kc_values import MOIS
+        from app.agrismart.kc_values import MOIS, JOURS_MOIS
+        from app.agrismart.irrigation import pump_flow_ls
         combined_monthly = []
         for i, mois in enumerate(MOIS):
             vol_total     = sum(r["monthly"][i]["volume_total"]    for r in results)
@@ -277,12 +286,16 @@ def agrismart_calculate():
         total_boost      = sum(r["kpis"]["total_boost_m3"]  for r in results)
         total_optimal    = sum(r["kpis"]["total_optimal_m3"] for r in results)
         pic_m            = max(combined_monthly, key=lambda m: m["optimal_total"])
-        debit_pompe      = (pic_m["optimal_total"] / 30 / 12) * 0.277
+        # Pompe dimensionnée sur le mois de pointe de l'année sèche, avec le
+        # vrai nombre de jours de ce mois (auparavant : 30 j fixes).
+        debit_pompe      = pump_flow_ls(pic_m["optimal_total"], JOURS_MOIS[MOIS.index(pic_m["mois"])])
 
         return jsonify({
             "soil":             soil_name,
             "system":           system_name,
             "climate_source":   climate["source"],
+            "planting_month":   planting,
+            "method":           "FAO-56 (Kc journalier, bilan hydrique reporté) · Peff USDA SCS · année sèche = pluie fiable 80 %",
             "avg_temp":         climate.get("avg_temp"),
             "total_precip":     climate.get("total_precip"),
             "results":          results,
