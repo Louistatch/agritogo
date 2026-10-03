@@ -235,34 +235,17 @@ def _build_agronome(sb, card_number: str) -> dict:
     if not profiles:
         return {}
     ag = profiles[0]
-    agronome_id = ag["id"]
+
 
     canton_info = ag.get("cantons") or {}
     prefecture_info = canton_info.get("prefectures") or {}
     region_info = prefecture_info.get("regions") or {}
 
-    # Missions actives (DEMANDE ou EN_COURS)
-    missions_res = (
-        sb.table("haroo_missions")
-        .select("id, description, statut, budget_propose, date_debut, date_fin, exploitant_name")
-        .eq("agronome_id", agronome_id)
-        .in_("statut", ["DEMANDE", "EN_COURS"])
-        .order("created_at", desc=True)
-        .limit(5)
-        .execute()
-    )
-    missions = [
-        {
-            "id": str(r["id"]),
-            "description": r.get("description"),
-            "statut": r.get("statut"),
-            "budget_propose": float(r["budget_propose"]) if r.get("budget_propose") else None,
-            "date_debut": r.get("date_debut"),
-            "date_fin": r.get("date_fin"),
-            "exploitant": r.get("exploitant_name"),
-        }
-        for r in (missions_res.data or [])
-    ]
+    # Les missions (nom de l'exploitant, budget, dates) ne sont PLUS exposées
+    # sur la carte publique : elles sont privées à l'agronome et au demandeur
+    # (FaîtiereHub, /api/haroo/missions). La fiche scannée sert à présenter
+    # l'agronome et à lui demander une mission.
+    missions: list[dict] = []
 
     return {
         "agronome": {
