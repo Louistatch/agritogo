@@ -108,7 +108,10 @@ def register_user(payload: dict) -> tuple[dict, int]:
             json={
                 "email": data["email"],
                 "password": data["password"],
-                "email_confirm": True,
+                # Confirmé d'office tant que la confirmation par e-mail n'est pas
+                # activée (REQUIRE_EMAIL_CONFIRMATION=true ici ET sur FaîtiereHub,
+                # qui envoie alors le lien via le SMTP Supabase/Resend).
+                "email_confirm": os.environ.get("REQUIRE_EMAIL_CONFIRMATION") != "true",
                 "user_metadata": {
                     "first_name": data["first_name"],
                     "last_name": data["last_name"],
