@@ -1,3 +1,11 @@
+"""DÉPRÉCIÉ — ne pas utiliser pour conseiller un producteur.
+
+Audit oct. 2026 : ce module entraîne une forêt aléatoire sur des parcelles
+FICTIVES générées à partir de rendements saisis à la main et d'une formule ;
+le R² affiché mesure sa capacité à réapprendre cette formule, pas à prédire.
+Remplacé par app.agrismart.yield_estimate (FAO-33 sur bilan FAO-56, références
+sourcées, limites affichées). Conservé pour l'écran d'administration historique.
+"""
 """Climate-Resilient Crop Yield Prediction — uses REAL data from Supabase.
 
 Data sources:

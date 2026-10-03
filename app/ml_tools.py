@@ -1,7 +1,6 @@
 """Outils AgentScope pour les 5 modules ML."""
 
 from agentscope.tool import ToolResponse
-from app.ml.crop_yield import run_crop_yield_prediction
 from app.ml.garch_volatility import run_garch_forecast
 from app.ml.financial_risk import run_risk_assessment
 from app.ml.farmer_segmentation import run_farmer_segmentation
@@ -9,21 +8,38 @@ from app.ml.kpi_dashboard import get_kpi_data
 import json
 
 
-async def predire_rendement_cultures() -> ToolResponse:
-    """Lance la prédiction de rendement agricole avec Random Forest et XGBoost.
-    Analyse l'impact du climat sur les cultures au Togo.
+async def predire_rendement_cultures(
+    culture: str = "Maïs", region: str = "Kara", irrigation: str = "pluviale", sol: str = "limoneux"
+) -> ToolResponse:
+    """Rendement attendu d'une culture dans une région du Togo (méthode FAO-33).
+
+    Part du rendement moyen national observé (sourcé) et le corrige selon la
+    satisfaction des besoins en eau de la région (bilan FAO-56). Renvoie une
+    fourchette, la source et les limites — à citer telles quelles.
+
+    Args:
+        culture: Maïs, Sorgho, Mil, Soja, Arachide, Niébé, Tomate, Oignon, Piment, Gombo
+        region: Maritime, Plateaux, Centrale, Kara ou Savanes
+        irrigation: « pluviale » ou un système d'irrigation
+        sol: sableux, sableux-limoneux, limoneux, argilo-limoneux, argileux
 
     Returns:
-        Résultats du modèle avec métriques et feature importance.
+        Rendement attendu (t/ha) année normale / sèche, fourchette, sources, limites.
     """
-    result = run_crop_yield_prediction()
-    lines = [f"🌾 {result['summary']}", ""]
-    lines.append("Métriques:")
-    for model, m in result["metrics"].items():
-        lines.append(f"  {model}: R²={m.get('r2')} | RMSE={m.get('rmse')}")
-    lines.append("\nFeatures les plus importantes:")
-    for f in result["feature_importance"]:
-        lines.append(f"  {f['feature']}: {f['score']}")
+    from app.agrismart.yield_estimate import estimate
+
+    r = estimate(culture, region=region, soil_type=sol, irrigation=irrigation)
+    if not r.get("ok"):
+        return ToolResponse(content=f"Estimation impossible : {r.get('reason')}")
+    y, m = r["yield_t_ha"], r["method"]
+    lines = [
+        f"🌾 {r['crop']} — {r['region'] or 'GPS'} ({'irrigué' if r['irrigated'] else 'pluvial'}, semis {r['planting_month']})",
+        f"Rendement attendu : {y['annee_normale']} t/ha (année normale), {y['annee_seche']} t/ha (année sèche)",
+        f"Fourchette : {y['fourchette'][0]} – {y['fourchette'][1]} t/ha",
+        f"Référence : {m['yref_t_ha']} t/ha ({m['yref_status']}) — {m['yref_source']}",
+        f"Méthode : FAO-33, Ky = {m['ky']} ({m['ky_source']})",
+        "Limites : " + " ; ".join(m["limits"]),
+    ]
     return ToolResponse(content="\n".join(lines))
 
 
