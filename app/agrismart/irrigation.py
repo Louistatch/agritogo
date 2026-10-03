@@ -1,36 +1,70 @@
 """
-Calcul des besoins en irrigation — FAO-56 bilan hydrique complet.
+Besoins en irrigation — FAO-56, pas journalier agrégé par mois.
 
-Formule de base :
-  ETM        = ETP × Kc × nb_jours           (besoin évapotranspiration mm/mois)
-  Peff       = pluies efficaces USDA SCS      (mm/mois)
-  RU         = sol.RU × profondeur_Z          (réserve utile mm)
-  RFU        = (2/3) × RU                    (réserve facilement utilisable mm)
-  Bilan      = Peff + RFU - ETM
-  BNet       = max(0, -Bilan)               (besoin net survie mm/mois)
-  BBrut      = BNet / efficience             (besoin brut mm/mois)
-  Volume     = BBrut × 10                   (m³/ha/mois)
+Méthode (Allen et al., 1998 ; CROPWAT) :
+  ETc(j)   = ETo(mois) × Kc(j)            Kc journalier de la courbe FAO-56,
+                                          à partir du mois de repiquage
+  Peff     = USDA SCS (CROPWAT) :          P ≤ 250 : P(125 − 0,2P)/125
+                                          P > 250 : 125 + 0,1P
+             au prorata des jours de culture dans le mois
+  Réserve  = RFU = p × RU(sol) × Zr        pleine au repiquage, CONSOMMÉE puis
+                                          rechargée par les excédents de pluie
+                                          (jamais remise à plein chaque mois)
+  Besoin net = ETc − Peff − prélèvement sur la réserve (≥ 0)
+  Besoin brut = net / efficience ;  m³ = mm × 10 × ha
 
-Rendement optimal (RAG agronomique Togo) :
-  Même si BNet = 0 (pluie couvre les besoins), une part de la pluie mensuelle
-  est mal répartie intra-mois (CV pluie Togo ≈ 0.40). Une irrigation
-  complémentaire de 15 % de l'ETM garantit le rendement maximal.
+Deux scénarios de pluie :
+  « année normale »  : pluie moyenne (Peff USDA SCS)     → volume_total
+  « année sèche »    : pluie fiable 4 ans sur 5 (FAO,
+                       0,6P − 10 si P ≤ 70, sinon 0,8P − 24) → dimensionnement
+  boost_* = marge à prévoir pour l'année sèche (sèche − normale).
 
-  boost_mm  = max(0.15 × ETM, 5 mm)   quand besoin_net = 0
-  boost_mm  = 0                         quand besoin_net > 0  (déjà couvert)
-  boost_vol = boost_mm / eff × 10      (m³/ha/mois)
+Avant cet audit : Kc fixe sur 12 mois (culture présente toute l'année),
+réserve du sol remise à plein chaque mois, pluie efficace « 0,85P + 3 »
+non standard, et un « boost » de 15 % de l'ETM sans source. Ces trois
+choix sous-estimaient les besoins de saison sèche.
 """
 
-from app.agrismart.kc_values import KC_VALUES, IRRIGATION_SYSTEMS, MOIS, JOURS_MOIS, MOIS_TO_JAN_IDX
+from app.agrismart.kc_values import (
+    CROPS,
+    DEFAULT_PLANTING,
+    IRRIGATION_SYSTEMS,
+    JOURS_MOIS,
+    MOIS,
+    MOIS_TO_JAN_IDX,
+    cycle_length,
+    daily_kc_zr,
+)
 
-# Coefficient de complément rendement optimal (15 % ETM → études IRRI / Togo)
-_BOOST_COEF = 0.15
-_BOOST_MIN_MM = 5.0   # plancher minimal même en saison des pluies
+PUMP_HOURS_PER_DAY = 12
 
 
-def _pluie_efficace(p_mm: float) -> float:
-    """Pluies efficaces USDA SCS (mensuel)."""
-    return (0.85 * p_mm + 3) if p_mm > 17 else 0.0
+def peff_usda(p_mm: float) -> float:
+    """Pluie efficace mensuelle USDA SCS (formule CROPWAT)."""
+    if p_mm <= 0:
+        return 0.0
+    return p_mm * (125 - 0.2 * p_mm) / 125 if p_mm <= 250 else 125 + 0.1 * p_mm
+
+
+def peff_dependable(p_mm: float) -> float:
+    """Pluie efficace fiable (probabilité 80 %), formule FAO/CROPWAT."""
+    return max(0.0, 0.6 * p_mm - 10 if p_mm <= 70 else 0.8 * p_mm - 24)
+
+
+def _cycle_by_month(crop: dict, planting: str) -> list[dict]:
+    """Agrège la courbe journalière par mois du cycle : jours, Σ Kc, Zr fin de mois."""
+    start = MOIS.index(planting)
+    out = [{"days": 0, "kc_sum": 0.0, "zr": 0.0} for _ in range(12)]
+    m, d_in_m = start, 0
+    for day in range(cycle_length(crop)):
+        kc, zr = daily_kc_zr(crop, day)
+        out[m]["days"] += 1
+        out[m]["kc_sum"] += kc
+        out[m]["zr"] = zr
+        d_in_m += 1
+        if d_in_m >= JOURS_MOIS[m]:
+            m, d_in_m = (m + 1) % 12, 0
+    return out
 
 
 def compute_monthly_needs(
@@ -39,110 +73,114 @@ def compute_monthly_needs(
     soil_ru: float,
     system_name: str,
     climate: dict,
+    planting: str = DEFAULT_PLANTING,
 ) -> list[dict]:
-    """
-    Calcule les besoins en eau mensuels.
-
-    Args:
-        crop_name   : nom de la culture (clé de KC_VALUES)
-        area_m2     : superficie en m²
-        soil_ru     : RU du sol en mm/m (depuis SOIL_PROFILES)
-        system_name : système d'irrigation (clé de IRRIGATION_SYSTEMS)
-        climate     : dict retourné par climate_normals.get_nasa_climatology()
-
-    Returns:
-        liste de 12 dicts (un par mois Avr→Mars)
-    """
-    crop    = KC_VALUES[crop_name]
-    eff     = IRRIGATION_SYSTEMS[system_name]["efficiency"]
+    """12 lignes (ordre MOIS, Avril → Mars) ; mois hors cycle à zéro."""
+    crop = CROPS[crop_name]
+    eff = IRRIGATION_SYSTEMS[system_name]["efficiency"]
     area_ha = area_m2 / 10_000
+    cyc = _cycle_by_month(crop, planting)
 
-    etp_jan   = climate["etp_mensuelle"]
-    pluie_jan = climate["pluie_mensuelle"]
+    # Ordre chronologique du cycle à partir du repiquage (franchit l'année).
+    start = MOIS.index(planting)
+    order = [(start + k) % 12 for k in range(12)]
+    rows: dict[int, dict] = {}
+    stock = {"normal": None, "dry": None}
 
-    rows = []
-    for i, mois in enumerate(MOIS):
-        jan_idx  = MOIS_TO_JAN_IDX[mois]
-        nb_jours = JOURS_MOIS[i]
-        etp      = etp_jan[jan_idx]
-        pluie    = pluie_jan[jan_idx]
-        kc       = crop["kc"][i]
-        z        = crop["z"][i]
+    for i in order:
+        c = cyc[i]
+        jan_idx = MOIS_TO_JAN_IDX[MOIS[i]]
+        etp = climate["etp_mensuelle"][jan_idx]
+        pluie = climate["pluie_mensuelle"][jan_idx]
+        days = c["days"]
+        frac = days / JOURS_MOIS[i]
+        etm = etp * c["kc_sum"]                       # Σ ETo × Kc(j)
+        kc_mean = c["kc_sum"] / days if days else 0.0
+        ru = soil_ru * c["zr"]
+        rfu = crop["p"] * ru
+        peff = peff_usda(pluie) * frac
+        peff80 = peff_dependable(pluie) * frac
 
-        etm         = etp * kc * nb_jours
-        peff        = _pluie_efficace(pluie)
-        ru          = soil_ru * z
-        rfu         = (2 / 3) * ru
-        bilan       = (peff + rfu) - etm
-        besoin_net  = max(0.0, -bilan)
-        besoin_brut = besoin_net / eff
-        volume_ha   = besoin_brut * 10
-        volume_m2   = volume_ha * area_ha    # total m³ pour la surface
+        res = {}
+        for key, rain in (("normal", peff), ("dry", peff80)):
+            if days == 0:
+                res[key] = 0.0
+                continue
+            if stock[key] is None:
+                stock[key] = rfu                      # réserve pleine au repiquage
+            deficit = etm - rain
+            if deficit > 0:
+                use = min(stock[key], deficit)
+                stock[key] -= use
+                res[key] = deficit - use
+            else:
+                stock[key] = min(rfu, stock[key] - deficit)
+                res[key] = 0.0
+            stock[key] = min(stock[key], rfu)
 
-        # ── Rendement optimal ──────────────────────────────────────────
-        # Mois où la pluie couvre la survie → supplément pour rendement max
-        if besoin_net == 0 and etm > 0:
-            boost_mm  = max(_BOOST_COEF * etm, _BOOST_MIN_MM)
-        else:
-            boost_mm  = 0.0
-        boost_vol_ha  = (boost_mm / eff) * 10       # m³/ha
-        boost_vol_m2  = boost_vol_ha * area_ha       # m³ total parcelle
+        net = res["normal"]
+        net_dry = max(res["dry"], net)
+        brut = net / eff
+        brut_dry = net_dry / eff
+        rows[i] = {
+            "mois": MOIS[i],
+            "mois_idx": i,
+            "nb_jours": days,
+            "etp": round(etp, 2),
+            "kc": round(kc_mean, 2),
+            "z": round(c["zr"], 2),
+            "etm": round(etm, 1),
+            "pluie": round(pluie, 1),
+            "peff": round(peff, 1),
+            "peff_seche": round(peff80, 1),
+            "ru": round(ru, 1),
+            "rfu": round(rfu, 1),
+            "bilan": round(peff - etm, 1),
+            "besoin_net": round(net, 1),
+            "besoin_brut": round(brut, 1),
+            "volume_ha": round(brut * 10, 1),
+            "volume_total": round(brut * 10 * area_ha, 2),
+            "boost_mm": round(net_dry - net, 1),
+            "boost_vol_ha": round((brut_dry - brut) * 10, 1),
+            "boost_vol_total": round((brut_dry - brut) * 10 * area_ha, 2),
+        }
+    return [rows[i] for i in range(12)]
 
-        rows.append({
-            "mois":            mois,
-            "mois_idx":        i,
-            "nb_jours":        nb_jours,
-            "etp":             round(etp, 2),
-            "kc":              round(kc, 2),
-            "z":               round(z, 2),
-            "etm":             round(etm, 1),
-            "pluie":           round(pluie, 1),
-            "peff":            round(peff, 1),
-            "ru":              round(ru, 1),
-            "rfu":             round(rfu, 1),
-            "bilan":           round(bilan, 1),
-            "besoin_net":      round(besoin_net, 1),
-            "besoin_brut":     round(besoin_brut, 1),
-            "volume_ha":       round(volume_ha, 1),
-            "volume_total":    round(volume_m2, 2),
-            "boost_mm":        round(boost_mm, 1),
-            "boost_vol_ha":    round(boost_vol_ha, 1),
-            "boost_vol_total": round(boost_vol_m2, 2),
-        })
 
-    return rows
+def pump_flow_ls(peak_m3: float, days: int) -> float:
+    """Débit (L/s) pour apporter `peak_m3` sur `days` jours à 12 h/j."""
+    if days <= 0:
+        return 0.0
+    return peak_m3 / days / PUMP_HOURS_PER_DAY / 3.6
 
 
 def compute_kpis(rows: list[dict], area_m2: float, system_name: str, crop_name: str = "") -> dict:
-    """Calcule les KPIs de saison à partir des lignes mensuelles."""
-    area_ha        = area_m2 / 10_000
-    total_m3       = sum(r["volume_total"] for r in rows)
-    total_boost    = sum(r["boost_vol_total"] for r in rows)
-    total_optimal  = total_m3 + total_boost
-    pic            = max(rows, key=lambda r: r["volume_total"] + r["boost_vol_total"])
-    pic_vol        = pic["volume_total"] + pic["boost_vol_total"]
-    debit_pompe    = (pic_vol / 30 / 12) * 0.277
-    avg_kc         = sum(r["kc"] for r in rows) / 12
-    avg_etp        = sum(r["etp"] for r in rows) / 12
-    max_besoin_net = max(r["besoin_net"] for r in rows)
-    eff            = IRRIGATION_SYSTEMS[system_name]["efficiency"]
-    mois_zero      = [r["mois"] for r in rows if r["besoin_net"] == 0 and r["etm"] > 0]
-
+    """Indicateurs de saison ; la pompe est dimensionnée sur l'année sèche."""
+    area_ha = area_m2 / 10_000
+    total_m3 = sum(r["volume_total"] for r in rows)
+    total_boost = sum(r["boost_vol_total"] for r in rows)
+    in_cycle = [r for r in rows if r["nb_jours"] > 0]
+    pic = max(rows, key=lambda r: r["volume_total"] + r["boost_vol_total"])
+    pic_vol = pic["volume_total"] + pic["boost_vol_total"]
+    eff = IRRIGATION_SYSTEMS[system_name]["efficiency"]
+    mois_zero = [r["mois"] for r in in_cycle if r["besoin_net"] == 0]
+    n = max(len(in_cycle), 1)
     return {
-        "crop":             crop_name,
-        "area_m2":          area_m2,
-        "area_ha":          round(area_ha, 4),
-        "total_m3":         round(total_m3, 1),
-        "total_boost_m3":   round(total_boost, 1),
-        "total_optimal_m3": round(total_optimal, 1),
-        "avg_monthly_m3":   round(total_m3 / 12, 2),
-        "pic_mois":         pic["mois"],
-        "pic_volume_m3":    round(pic_vol, 1),
-        "debit_pompe_ls":   round(debit_pompe, 3),
-        "avg_kc":           round(avg_kc, 2),
-        "avg_etp_mmj":      round(avg_etp, 2),
-        "max_besoin_net":   round(max_besoin_net, 1),
-        "efficiency_pct":   int(eff * 100),
+        "crop": crop_name,
+        "area_m2": area_m2,
+        "area_ha": round(area_ha, 4),
+        "total_m3": round(total_m3, 1),
+        "total_boost_m3": round(total_boost, 1),
+        "total_optimal_m3": round(total_m3 + total_boost, 1),
+        "avg_monthly_m3": round(total_m3 / n, 2),
+        "pic_mois": pic["mois"],
+        "pic_volume_m3": round(pic_vol, 1),
+        "debit_pompe_ls": round(pump_flow_ls(pic_vol, pic["nb_jours"]), 3),
+        "avg_kc": round(sum(r["kc"] for r in in_cycle) / n, 2),
+        "avg_etp_mmj": round(sum(r["etp"] for r in in_cycle) / n, 2),
+        "max_besoin_net": round(max(r["besoin_net"] for r in rows), 1),
+        "efficiency_pct": int(eff * 100),
         "mois_pluie_couvre": mois_zero,
-        "nb_mois_zero":     len(mois_zero),
+        "nb_mois_zero": len(mois_zero),
+        "nb_mois_cycle": len(in_cycle),
     }

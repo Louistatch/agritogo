@@ -1,6 +1,7 @@
 """
 Normales climatiques 30 ans via NASA POWER Climatology.
-ETP Penman-Monteith FAO-56 calculée depuis T, RH, Vent, Rayonnement.
+ETP Penman-Monteith FAO-56 calculée depuis T, RH, Vent, Rayonnement
+(community=ag : rayonnement en MJ/m²/j, pluie en mm/j).
 
 Endpoint : https://power.larc.nasa.gov/api/temporal/climatology/point
 (différent du endpoint daily utilisé dans app/climate.py)
@@ -54,20 +55,48 @@ REGION_COORDS = {
 }
 
 
-def _penman_monteith(tmax, tmin, tmean, rh, ws, rs):
-    """ETP Penman-Monteith FAO-56 (mm/jour)."""
-    es    = 0.6108 * math.exp(17.27 * tmean / (tmean + 237.3))
-    ea    = es * rh / 100.0
-    delta = 4098 * es / (tmean + 237.3) ** 2
-    gamma = 0.0665
-    rns   = 0.77 * rs
+_MID_MONTH_DOY = [15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349]
+
+
+def _ra(lat_deg: float, doy: int) -> float:
+    """Rayonnement extraterrestre Ra (MJ m⁻² j⁻¹), FAO-56 éq. 21–25."""
+    phi = math.radians(lat_deg)
+    dr = 1 + 0.033 * math.cos(2 * math.pi * doy / 365)
+    delta = 0.409 * math.sin(2 * math.pi * doy / 365 - 1.39)
+    ws = math.acos(max(-1.0, min(1.0, -math.tan(phi) * math.tan(delta))))
+    return (24 * 60 / math.pi) * 0.0820 * dr * (
+        ws * math.sin(phi) * math.sin(delta) + math.cos(phi) * math.cos(delta) * math.sin(ws)
+    )
+
+
+def _es(t: float) -> float:
+    return 0.6108 * math.exp(17.27 * t / (t + 237.3))
+
+
+def _penman_monteith(tmax, tmin, tmean, rh, ws, rs, lat=8.5, doy=166, g=0.0, z=200.0):
+    """ETo Penman-Monteith FAO-56 (mm/jour), pas mensuel.
+
+    Corrections de l'audit (oct. 2026) :
+      - es = moyenne de e°(Tmax) et e°(Tmin) (éq. 12), et non e°(Tmoy) ;
+      - Rso = (0,75 + 2e-5 z) Ra avec Ra calculé (latitude, jour) — l'ancien
+        code dérivait Rso de Rs lui-même, ce qui faussait Rnl ;
+      - Rs/Rso plafonné à 1 ; flux de chaleur du sol mensuel G (éq. 43).
+    """
+    es = (_es(tmax) + _es(tmin)) / 2
+    ea = es * rh / 100.0
+    delta = 4098 * _es(tmean) / (tmean + 237.3) ** 2
+    pressure = 101.3 * ((293 - 0.0065 * z) / 293) ** 5.26
+    gamma = 0.000665 * pressure
+    rso = (0.75 + 2e-5 * z) * _ra(lat, doy)
+    ratio = min(rs / rso, 1.0) if rso > 0 else 0.7
+    rns = 0.77 * rs
     sigma = 4.903e-9
-    rnl   = (sigma * ((tmax + 273.16) ** 4 + (tmin + 273.16) ** 4) / 2
-             * (0.34 - 0.14 * math.sqrt(max(ea, 0)))
-             * (1.35 * rs / max(0.75 * rs + 0.1, 0.01) - 0.35))
-    rn    = rns - rnl
-    eto   = (0.408 * delta * rn + gamma * (900 / (tmean + 273)) * ws * (es - ea)) / \
-            (delta + gamma * (1 + 0.34 * ws))
+    rnl = (sigma * ((tmax + 273.16) ** 4 + (tmin + 273.16) ** 4) / 2
+           * (0.34 - 0.14 * math.sqrt(max(ea, 0)))
+           * (1.35 * ratio - 0.35))
+    rn = rns - rnl
+    eto = (0.408 * delta * (rn - g) + gamma * (900 / (tmean + 273)) * ws * (es - ea)) / \
+          (delta + gamma * (1 + 0.34 * ws))
     return max(0.0, round(eto, 2))
 
 
@@ -92,10 +121,13 @@ def get_nasa_climatology(lat: float, lon: float) -> dict:
         d = r.json()["properties"]["parameter"]
 
         etp_list, pluie_list, temp_list = [], [], []
+        temps = [d["T2M"][m] for m in _NASA_MONTHS]
         for i, m in enumerate(_NASA_MONTHS):
+            g = 0.07 * (temps[(i + 1) % 12] - temps[i - 1])   # FAO-56 éq. 43
             eto = _penman_monteith(
                 d["T2M_MAX"][m], d["T2M_MIN"][m], d["T2M"][m],
                 d["RH2M"][m], d["WS2M"][m], d["ALLSKY_SFC_SW_DWN"][m],
+                lat=lat, doy=_MID_MONTH_DOY[i], g=g,
             )
             pluie = round(d["PRECTOTCORR"][m] * _JOURS_MOIS[i], 1)
             etp_list.append(eto)
