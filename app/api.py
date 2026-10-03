@@ -194,6 +194,25 @@ def agrismart_soil_types():
     return jsonify({"soil_types": types})
 
 
+def _agrismart_details_allowed() -> bool:
+    """Le détail (mois par mois, par culture) n'est servi qu'à FaîtiereHub.
+
+    FaîtiereHub n'ajoute l'en-tête X-Agrismart-Key qu'après avoir vérifié
+    côté serveur que l'utilisateur est agronome (ou consulte une carte
+    valide). Sans clé valable, seul le bilan global est renvoyé. Tant que
+    AGRISMART_INTERNAL_KEY n'est pas configurée, le comportement historique
+    (détail complet) est conservé pour ne rien casser.
+    """
+    import hmac
+    import os
+
+    expected = os.environ.get("AGRISMART_INTERNAL_KEY", "")
+    if not expected:
+        return True
+    given = request.headers.get("X-Agrismart-Key", "")
+    return hmac.compare_digest(given.encode(), expected.encode())
+
+
 @api_bp.route("/agrismart/calculate", methods=["POST"])
 def agrismart_calculate():
     """
@@ -290,7 +309,7 @@ def agrismart_calculate():
         # vrai nombre de jours de ce mois (auparavant : 30 j fixes).
         debit_pompe      = pump_flow_ls(pic_m["optimal_total"], JOURS_MOIS[MOIS.index(pic_m["mois"])])
 
-        return jsonify({
+        response = {
             "soil":             soil_name,
             "system":           system_name,
             "climate_source":   climate["source"],
@@ -309,7 +328,11 @@ def agrismart_calculate():
                 "pic_optimal_m3":     round(pic_m["optimal_total"], 1),
                 "debit_pompe_ls":     round(debit_pompe, 3),
             },
-        })
+        }
+        if not _agrismart_details_allowed():
+            from app.agrismart.access import summary_only
+            response = summary_only(response)
+        return jsonify(response)
 
     except Exception as e:
         import traceback
