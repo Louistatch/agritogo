@@ -141,16 +141,25 @@ def register_user(payload: dict) -> tuple[dict, int]:
         # que bootstrap_cooperative_admin promeut le jour où ce professionnel
         # rejoint une coopérative. Y écrire le type Haroo, comme on le faisait,
         # écrasait cette couche : un compte ne pouvait pas être les deux.
-        sb.table("profiles").upsert(
-            {
-                "id": user_id,
-                "email": data["email"],
-                "first_name": data["first_name"],
-                "last_name": data["last_name"],
-                "haroo_type": haroo_type,
-            },
-            on_conflict="id",
-        ).execute()
+        #
+        # MISE À JOUR de la ligne créée par le trigger handle_new_user, et non
+        # upsert : un upsert est un INSERT dont la ligne proposée reçoit les
+        # valeurs par défaut de la table, et Postgres la vérifie contre
+        # profiles_org_role_needs_cooperative AVANT de constater le conflit —
+        # c'est ce qui faisait échouer l'inscription (rôle par défaut 'member'
+        # sans coopérative). Si le trigger n'a pas encore écrit la ligne, on
+        # l'insère avec un rôle EXPLICITE 'none'.
+        fields = {
+            "email": data["email"],
+            "first_name": data["first_name"],
+            "last_name": data["last_name"],
+            "haroo_type": haroo_type,
+        }
+        updated = sb.table("profiles").update(fields).eq("id", user_id).execute()
+        if not (updated.data or []):
+            sb.table("profiles").insert(
+                {"id": user_id, "role": "none", "cooperative_id": None, **fields}
+            ).execute()
 
         # ── 3. Profil métier Haroo ──────────────────────────────────────────────
         sb.table(table).insert(
