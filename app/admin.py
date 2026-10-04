@@ -1,7 +1,7 @@
 """Routes admin Flask pour AgriTogo — Data, KoboCollect, ML modules."""
 
 import os
-from flask import Blueprint, render_template, request, Response
+from flask import Blueprint, render_template, request, Response, jsonify
 from app.database import (
     get_produits, get_marches, get_db_stats, get_all_prix,
     add_produit, delete_produit, delete_prix,
@@ -19,6 +19,28 @@ admin_bp = Blueprint("admin", __name__, url_prefix="/admin", template_folder="te
 # Use same robust path resolution as ML modules
 from app.ml import get_data_dir
 DATA_DIR = get_data_dir()
+
+# Cibles d'upload autorisées (les seuls fichiers lus par les modules ML/admin).
+ALLOWED_DATASET_TARGETS = frozenset({
+    "archive1/yield_df.csv",
+    "archive1/rainfall.csv",
+    "archive1/temp.csv",
+    "Core_TimeSeries.csv",
+    "AgriRiskFin_Dataset.csv",
+    "Copy of data2(1).xlsx",
+})
+
+
+@admin_bp.before_request
+def _require_super_admin():
+    """Tout /admin/* est réservé au super_admin (même contrôle que require_super_admin)."""
+    from app.auth_guard import require_super_admin
+
+    @require_super_admin
+    def _ok():
+        return None
+
+    return _ok()
 
 
 @admin_bp.route("/")
@@ -113,10 +135,13 @@ def admin_upload_dataset():
     target = request.form.get("target", "")
     msg = "No file uploaded"
     if f and target:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        if target.startswith("archive1/"):
-            os.makedirs(os.path.join(DATA_DIR, "archive1"), exist_ok=True)
-        dest = os.path.join(DATA_DIR, target)
+        if target not in ALLOWED_DATASET_TARGETS:
+            return jsonify({"error": "Cible invalide"}), 400
+        base = os.path.realpath(DATA_DIR)
+        dest = os.path.realpath(os.path.join(base, target))
+        if os.path.commonpath([base, dest]) != base:
+            return jsonify({"error": "Cible invalide"}), 400
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
         f.save(dest)
         msg = f"Uploaded {target} ({os.path.getsize(dest):,} bytes)"
     return f'<div class="admin-msg">{msg}</div>'
