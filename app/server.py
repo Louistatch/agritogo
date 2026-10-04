@@ -17,25 +17,20 @@ app = Flask(
     template_folder=os.path.join(os.path.dirname(__file__), "templates"),
     static_folder=os.path.join(os.path.dirname(__file__), "static"),
 )
-app.secret_key = os.environ.get("SECRET_KEY", "agritogo-secret-key-2026")
+_secret_key = os.environ.get("SECRET_KEY")
+if not _secret_key:
+    import secrets
+    import logging
+    _secret_key = secrets.token_hex(32)
+    logging.getLogger(__name__).warning(
+        "SECRET_KEY absent : clé aléatoire générée (sessions invalidées au redémarrage)"
+    )
+app.secret_key = _secret_key
 
 # ── Health check — registered FIRST, responds in <1ms ────────
 @app.route("/health")
 def health():
     return {"status": "ok"}, 200
-
-@app.route("/debug/env")
-def debug_env():
-    from app.key_rotation import has_keys, _get_keys
-    return {
-        "gemini_keys_count": len(_get_keys()),
-        "gemini_keys_set": has_keys(),
-        "GEMINI_API_KEY_1": "SET" if os.environ.get("GEMINI_API_KEY_1") else "MISSING",
-        "GEMINI_API_KEY_2": "SET" if os.environ.get("GEMINI_API_KEY_2") else "MISSING",
-        "GEMINI_API_KEY_3": "SET" if os.environ.get("GEMINI_API_KEY_3") else "MISSING",
-        "ml_available": _ML_AVAILABLE,
-        "startup_done": _STARTUP_DONE,
-    }, 200
 
 # ── Lazy ML state — loaded in background after startup ───────
 _ML_AVAILABLE = False
