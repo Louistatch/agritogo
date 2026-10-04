@@ -105,7 +105,7 @@ async def ask_agent(question: str, model_choice: str = "gemini") -> str:
 
     # Log env state for Railway debugging
     key = get_gemini_key()
-    print(f"[AGENT] ask_agent called | key={'SET('+key[:8]+')' if key else 'EMPTY'} | has_keys={has_keys()}")
+    print(f"[AGENT] ask_agent called | key={'SET' if key else 'EMPTY'} | has_keys={has_keys()}")
 
     if not has_keys():
         return (
