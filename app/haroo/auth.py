@@ -38,6 +38,11 @@ PROFILE_TABLES = {
     "AGRONOME": ("haroo_agronome_profiles", "agronome"),
 }
 
+# Métiers du conseil agricole : tous dans haroo_agronome_profiles
+# (haroo_type 'agronome'), distingués par la colonne profession.
+PROFESSIONS = ("agronome", "technicien", "conseiller")
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_RE = re.compile(r"^[+0-9 ()\-.]{8,40}$")
 
@@ -78,6 +83,28 @@ def _validate_registration(payload: dict) -> tuple[dict | None, str | None]:
     if phone and not _PHONE_RE.match(phone):
         return None, "Numéro de téléphone invalide"
 
+    # Conseil agricole : faîtière de rattachement (vérifiée en base au moment
+    # de l'inscription), profession et spécialités. Ignorés pour les autres types.
+    faitiere_id = None
+    profession = None
+    specialisations: list[str] = []
+    if profile_type == "AGRONOME":
+        raw_faitiere = str(payload.get("faitiere_id") or "").strip()
+        if raw_faitiere:
+            if not _UUID_RE.match(raw_faitiere):
+                return None, "Faîtière invalide"
+            faitiere_id = raw_faitiere
+        profession = str(payload.get("profession") or "agronome").strip().lower()
+        if profession not in PROFESSIONS:
+            return None, "Profession invalide"
+        raw_specs = payload.get("specialisations") or []
+        if not isinstance(raw_specs, list) or len(raw_specs) > 10:
+            return None, "Spécialités invalides"
+        for spec in raw_specs:
+            value = str(spec).strip()
+            if value and len(value) <= 60 and value not in specialisations:
+                specialisations.append(value)
+
     return {
         "profile_type": profile_type,
         "email": email,
@@ -85,7 +112,26 @@ def _validate_registration(payload: dict) -> tuple[dict | None, str | None]:
         "first_name": first_name,
         "last_name": last_name,
         "phone": phone or None,
+        "faitiere_id": faitiere_id,
+        "profession": profession,
+        "specialisations": specialisations,
     }, None
+
+
+def _is_valid_faitiere(sb, faitiere_id: str) -> bool:
+    """La faîtière existe, est de niveau 'faitiere' et n'est pas supprimée."""
+    try:
+        res = (
+            sb.table("cooperatives")
+            .select("id, level, deleted_at")
+            .eq("id", faitiere_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        return False
+    rows = res.data or []
+    return bool(rows) and rows[0].get("level") == "faitiere" and not rows[0].get("deleted_at")
 
 
 def register_user(payload: dict) -> tuple[dict, int]:
@@ -100,6 +146,11 @@ def register_user(payload: dict) -> tuple[dict, int]:
     data, error = _validate_registration(payload or {})
     if error:
         return {"success": False, "error": error}, 400
+
+    # Vérifiée AVANT la création du compte auth : pas de compte orphelin si
+    # l'identifiant ne désigne pas une faîtière.
+    if data["faitiere_id"] and not _is_valid_faitiere(get_client(), data["faitiere_id"]):
+        return {"success": False, "error": "Faîtière inconnue"}, 400
 
     # ── 1. Créer l'utilisateur auth (email confirmé : pas de SMTP côté Haroo) ──
     try:
@@ -165,14 +216,20 @@ def register_user(payload: dict) -> tuple[dict, int]:
             ).execute()
 
         # ── 3. Profil métier Haroo ──────────────────────────────────────────────
-        sb.table(table).insert(
-            {
-                "user_id": user_id,
-                "first_name": data["first_name"],
-                "last_name": data["last_name"],
-                "phone": data["phone"],
-            }
-        ).execute()
+        profile_row = {
+            "user_id": user_id,
+            "first_name": data["first_name"],
+            "last_name": data["last_name"],
+            "phone": data["phone"],
+        }
+        if data["profile_type"] == "AGRONOME":
+            # profession : colonne de la migration 20261007_130000 (FaîtiereHub).
+            profile_row["profession"] = data["profession"] or "agronome"
+            if data["faitiere_id"]:
+                profile_row["faitiere_id"] = data["faitiere_id"]
+            if data["specialisations"]:
+                profile_row["specialisations"] = data["specialisations"]
+        sb.table(table).insert(profile_row).execute()
     except Exception as exc:
         # Rollback : ne pas laisser un compte auth orphelin sans profil Haroo.
         try:
