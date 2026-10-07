@@ -226,7 +226,7 @@ def _build_acheteur(sb, card_number: str) -> dict:
 def _build_agronome(sb, card_number: str) -> dict:
     res = (
         sb.table("haroo_agronome_profiles")
-        .select("id, first_name, last_name, phone, photo_url, specialisations, canton_id, badge_valide, statut_validation, note_moyenne, nombre_missions, cantons(name, prefectures(name, regions(name)))")
+        .select("id, first_name, last_name, photo_url, specialisations, canton_id, badge_valide, statut_validation, cantons(name, prefectures(name, regions(name)))")
         .eq("card_number", card_number)
         .limit(1)
         .execute()
@@ -247,11 +247,30 @@ def _build_agronome(sb, card_number: str) -> dict:
     # l'agronome et à lui demander une mission.
     missions: list[dict] = []
 
+    # Faîtière de rattachement (colonne faitiere_id, migration FaîtiereHub
+    # 20261007_120000_pro_cards_phase1). Requête séparée et tolérante : si la
+    # colonne n'existe pas encore, la vérification continue sans ce champ.
+    faitiere_name = None
+    try:
+        fres = (
+            sb.table("haroo_agronome_profiles")
+            .select("faitiere_id, cooperatives:faitiere_id(name)")
+            .eq("id", ag["id"])
+            .limit(1)
+            .execute()
+        )
+        frow = (fres.data or [{}])[0]
+        faitiere_name = (frow.get("cooperatives") or {}).get("name")
+    except Exception:
+        faitiere_name = None
+
+    # Vue PUBLIQUE : ni téléphone, ni notes, ni nombre de missions. Les clés
+    # restent présentes (valeurs neutres) pour la compatibilité des clients.
     return {
         "agronome": {
             "first_name": ag.get("first_name"),
             "last_name": ag.get("last_name"),
-            "phone": ag.get("phone"),
+            "phone": None,
             "photo_url": ag.get("photo_url"),
             "specialisations": ag.get("specialisations") or [],
             "canton": canton_info.get("name"),
@@ -259,8 +278,10 @@ def _build_agronome(sb, card_number: str) -> dict:
             "region": region_info.get("name"),
             "badge_valide": ag.get("badge_valide", False),
             "statut_validation": ag.get("statut_validation"),
-            "note_moyenne": float(ag.get("note_moyenne") or 0),
-            "nombre_missions": ag.get("nombre_missions", 0),
+            "verified": bool(ag.get("badge_valide")) and ag.get("statut_validation") == "VALIDE",
+            "faitiere_name": faitiere_name,
+            "note_moyenne": 0.0,
+            "nombre_missions": 0,
         },
         "missions": missions,
     }
