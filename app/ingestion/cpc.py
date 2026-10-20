@@ -372,6 +372,51 @@ def _extract_script_endpoint_hints(script_text: str, base_url: str) -> list[str]
     return list(dict.fromkeys(found))
 
 
+
+def _navigation_variants(url: str) -> list[str]:
+    """Try both canonical CPC hosts when one edge or redirect is unavailable."""
+    variants = [url]
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    if host in {"www.cpc-togo.com", "cpc-togo.com"}:
+        alternate = (
+            "cpc-togo.com" if host.startswith("www.") else "www.cpc-togo.com"
+        )
+        # Keep the path and query untouched: only switch the CPC hostname.
+        variants.append(urlunsplit(parts._replace(netloc=alternate)))
+    return variants
+
+
+async def _navigate_cpc(page: Any, url: str, timeout_ms: int = 20_000) -> None:
+    """Wait for the first document response, not every slow third-party asset.
+
+    CPC is a JavaScript app: its API calls can continue after the document
+    starts loading. Waiting for domcontentloaded on a congested server used to
+    abort discovery even if the first response had already arrived.
+    """
+    errors: list[str] = []
+    for candidate in _navigation_variants(url):
+        try:
+            await page.goto(candidate, wait_until="commit", timeout=timeout_ms)
+        except Exception as exc:
+            errors.append(
+                f"{candidate}: {type(exc).__name__}: {str(exc)[:160]}"
+            )
+            continue
+        # Best effort only. Extraction and XHR capture continue if loading hangs.
+        try:
+            await page.wait_for_load_state(
+                "domcontentloaded", timeout=7_000
+            )
+        except Exception:
+            pass
+        return
+    raise RuntimeError(
+        "CPC navigation unavailable (both public hosts tried): "
+        + " | ".join(errors)
+    )
+
+
 async def discover_cpc_source(
     url: str = "https://www.cpc-togo.com/prixproduit",
     browser_ws_endpoint: str | None = None,
@@ -592,19 +637,18 @@ async def discover_cpc_source(
                 pass
 
         async def settle() -> None:
-            try:
-                await page.wait_for_load_state(
-                    "networkidle",
-                    timeout=20_000,
-                )
-            except Exception:
-                pass
+            # No networkidle wait: analytics/polling may never go idle.
             await page.wait_for_timeout(int(settle_seconds * 1000))
             if pending:
-                await asyncio.gather(
-                    *pending,
-                    return_exceptions=True,
-                )
+                tasks = pending[:]
+                pending.clear()
+                done, waiting = await asyncio.wait(tasks, timeout=8.0)
+                for task in waiting:
+                    task.cancel()
+                if done:
+                    await asyncio.gather(*done, return_exceptions=True)
+                if waiting:
+                    await asyncio.gather(*waiting, return_exceptions=True)
 
         async def safe_filter_probe() -> None:
             selects = page.locator("select")
@@ -694,11 +738,7 @@ async def discover_cpc_source(
                 except Exception:
                     continue
 
-        await page.goto(
-            url,
-            wait_until="domcontentloaded",
-            timeout=60_000,
-        )
+        await _navigate_cpc(page, url)
         await settle()
         page_title = await page.title()
         await collect_page_snapshot()
@@ -735,11 +775,7 @@ async def discover_cpc_source(
         for target in ordered_pages:
             if target != page.url:
                 try:
-                    await page.goto(
-                        target,
-                        wait_until="domcontentloaded",
-                        timeout=45_000,
-                    )
+                    await _navigate_cpc(page, target, timeout_ms=15_000)
                     await settle()
                 except Exception:
                     continue
@@ -748,10 +784,12 @@ async def discover_cpc_source(
             await collect_page_snapshot()
 
         if pending:
-            await asyncio.gather(
-                *pending,
-                return_exceptions=True,
-            )
+            tasks = pending[:]
+            pending.clear()
+            _, waiting = await asyncio.wait(tasks, timeout=8.0)
+            for task in waiting:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         page_url = page.url
         joined_text = "\n".join(all_page_text)
@@ -825,8 +863,20 @@ def fetch_remaining_pages(
     if "page" not in query:
         return first_text
 
+    try:
+        initial_page = int(query["page"])
+    except ValueError:
+        return first_text
+    if initial_page < 0 or initial_page >= total_pages:
+        return first_text
+
     records = list(first["content"])
-    for page in range(1, min(total_pages, max_pages)):
+    fetched_pages = 1
+    # Cached endpoints may be page=5 or page=6: always fetch page=0 too,
+    # and never fetch the initial page twice.
+    for page in range(min(total_pages, max_pages)):
+        if page == initial_page:
+            continue
         query["page"] = str(page)
         page_url = urlunsplit(parts._replace(query=urlencode(query)))
         response = requests.get(page_url, headers=headers, timeout=timeout)
@@ -836,12 +886,13 @@ def fetch_remaining_pages(
         if not isinstance(content, list):
             break
         records.extend(content)
+        fetched_pages += 1
     return json.dumps(
         {
             "content": records,
             "totalElements": first.get("totalElements"),
             "totalPages": total_pages,
-            "pagesFetched": min(total_pages, max_pages),
+            "pagesFetched": fetched_pages,
         },
         ensure_ascii=False,
     )

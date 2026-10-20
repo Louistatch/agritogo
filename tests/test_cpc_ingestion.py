@@ -1,5 +1,7 @@
 """Tests for CPC market-data normalization."""
 
+from typing import Any
+
 from app.ingestion.cpc import (
     culture_candidates,
     normalize_payload,
@@ -261,3 +263,96 @@ def test_fetch_remaining_pages_leaves_single_page_untouched() -> None:
     text = '{"content": [{"id": 1}], "totalPages": 1}'
     assert fetch_remaining_pages("https://api.example/x?page=0", text, headers={}) == text
     assert fetch_remaining_pages("https://api.example/x", "plain text", headers={}) == "plain text"
+
+
+
+def test_pagination_from_cached_last_page_includes_first_page(
+    monkeypatch: Any,
+) -> None:
+    """Starting from a cached last page must still collect page zero."""
+    import json
+    from urllib.parse import parse_qs, urlsplit
+
+    from app.ingestion import cpc
+
+    urls: list[int] = []
+
+    class Response:
+        """Small HTTP stub returning a single pagination page."""
+
+        def __init__(self, n: int) -> None:
+            self.n = n
+
+        def raise_for_status(self) -> None:
+            """Simulate a successful HTTP response."""
+
+        def json(self) -> dict[str, Any]:
+            """Return a valid CPC-style page."""
+            return {"content": [{"id": self.n}], "totalPages": 3}
+
+    def fake_get(url: str, **kwargs: Any) -> Response:
+        """Capture requested page indexes without making HTTP requests."""
+        del kwargs
+        n = int(parse_qs(urlsplit(url).query)["page"][0])
+        urls.append(n)
+        return Response(n)
+
+    monkeypatch.setattr(cpc.requests, "get", fake_get)
+    first = json.dumps({"content": [{"id": 2}], "totalPages": 3})
+    merged = json.loads(
+        cpc.fetch_remaining_pages(
+            "https://example.org/api?page=2&size=500",
+            first,
+            headers={},
+        )
+    )
+    assert sorted(row["id"] for row in merged["content"]) == [0, 1, 2]
+    assert urls == [0, 1]
+    assert merged["pagesFetched"] == 3
+
+
+def test_navigation_variants_only_switch_official_cpc_host() -> None:
+    """Alternate hostname never modifies third-party URLs."""
+    from app.ingestion.cpc import _navigation_variants
+
+    assert _navigation_variants("https://www.cpc-togo.com/prixproduit") == [
+        "https://www.cpc-togo.com/prixproduit",
+        "https://cpc-togo.com/prixproduit",
+    ]
+    assert _navigation_variants("https://example.org/prixproduit") == [
+        "https://example.org/prixproduit",
+    ]
+
+
+def test_navigation_recovers_after_domcontentloaded_timeout() -> None:
+    """Document load timeouts after commit must not abort discovery."""
+    import asyncio
+
+    from app.ingestion.cpc import _navigate_cpc
+
+    class FakePage:
+        """Playwright-like page whose DOM load never completes."""
+
+        def __init__(self) -> None:
+            self.committed = False
+
+        async def goto(
+            self, url: str, wait_until: str, timeout: int
+        ) -> None:
+            """Simulate immediate document commit."""
+            del url, timeout
+            assert wait_until == "commit"
+            self.committed = True
+
+        async def wait_for_load_state(
+            self, state: str, timeout: int
+        ) -> None:
+            """Simulate a page with blocked DOMContentLoaded."""
+            del state, timeout
+            raise TimeoutError("simulated slow DOM")
+
+    page = FakePage()
+    asyncio.run(
+        _navigate_cpc(page, "https://www.cpc-togo.com/prixproduit")
+    )
+    assert page.committed

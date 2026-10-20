@@ -140,6 +140,45 @@ def main() -> int:
                     "error": str(exc)[:500],
                 })
 
+    # Deterministic fallback: the previously validated public CPC feed.
+    # Browser discovery is a last resort, not a prerequisite for every PR.
+    if not observations and not args.force_discovery:
+        from app.ingestion.cpc import fetch_candidate, normalize_payload
+        feed_url = os.getenv(
+            "CPC_FEED_URL",
+            "https://apicpc.cpc-togo.com/apicpc/prixMarche/"
+            "getAllValidation?page=0&size=500",
+        )
+        try:
+            raw_text, content_type = fetch_candidate(
+                {"url": feed_url, "method": "GET"}, timeout=18
+            )
+            observations = normalize_payload(
+                raw_text, content_type, feed_url, unit_hint=CPC_UNIT_HINT
+            )
+            acquisition_attempts.append({
+                "mode": "public_feed_fallback",
+                "endpoint": feed_url,
+                "observations": len(observations),
+            })
+            if observations:
+                extraction = {
+                    "mode": "public_feed_fallback",
+                    "endpoint": feed_url,
+                    "content_type": content_type,
+                    "raw_text": raw_text,
+                }
+                discovery_dict = {
+                    "mode": "public_feed_fallback",
+                    "endpoint": feed_url,
+                }
+        except Exception as exc:
+            acquisition_attempts.append({
+                "mode": "public_feed_fallback",
+                "endpoint": feed_url,
+                "error": str(exc)[:500],
+            })
+
     # Recovery path: rediscover the front-end data contract.
     if not observations:
         report = asyncio.run(
