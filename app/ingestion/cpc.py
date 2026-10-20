@@ -786,7 +786,7 @@ async def discover_cpc_source(
         if pending:
             tasks = pending[:]
             pending.clear()
-            done, waiting = await asyncio.wait(tasks, timeout=8.0)
+            _, waiting = await asyncio.wait(tasks, timeout=8.0)
             for task in waiting:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
