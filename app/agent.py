@@ -69,13 +69,9 @@ def _build_toolkit():
     if not _AGENTSCOPE_AVAILABLE:
         return None
     toolkit = Toolkit()
-    for fn in [consulter_prix, lister_produits, lister_marches,
-               enregistrer_prevision, analyser_tendance,
-               predire_rendement_cultures, prevoir_volatilite,
-               evaluer_risque_financier, segmenter_agriculteurs,
-               obtenir_kpi_agriculture,
-               consulter_donnees_terrain, analyser_collecte_terrain,
-               generer_formulaire_prix, generer_formulaire_agriculteur]:
+    # Public calls only get public, read-only tools.
+    for fn in [consulter_prix, lister_produits, lister_marches, analyser_tendance,
+               predire_rendement_cultures, prevoir_volatilite]:
         toolkit.register_tool_function(fn)
     return toolkit
 

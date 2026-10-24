@@ -193,6 +193,11 @@ def run_risk_assessment() -> dict:
     safest = min(risk_by_region.items(), key=lambda x: x[1]["high_pct"])
 
     return {
+        "validated_for_credit_decisions": False,
+        "model_status": "experimental",
+        "limitations": ["Données augmentées synthétiquement",
+                        "Cible proxy, pas de défauts de crédit observés",
+                        "Ne pas utiliser pour accorder ou refuser un crédit"],
         "data_quality": {
             "real_members": n_real,
             "total_used": len(data),

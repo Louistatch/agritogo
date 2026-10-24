@@ -2,6 +2,8 @@
 
 import os
 from datetime import datetime
+from collections import deque
+from app.security_context import private_tools_allowed
 
 # Lazy imports to avoid crash at startup if agentscope is not yet installed
 try:
@@ -42,8 +44,7 @@ from app.kobo_tools import (
 QUOTA_MESSAGE = "⚠️ Service temporairement indisponible (quota atteint). Réessayez dans 60 secondes."
 
 # Agent registry  (key: "{agent_type}_{model_name}")
-_agents = {}
-_memory_store = []
+_memory_store = deque(maxlen=100)
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
@@ -62,13 +63,17 @@ def _build_toolkit(tool_set="all"):
         return None
     toolkit = Toolkit()
     market_tools = [consulter_prix, lister_produits, lister_marches,
-                    enregistrer_prevision, analyser_tendance, prevoir_prix]
+                    analyser_tendance, prevoir_prix]
     ml_tools = [prevoir_prix, predire_rendement_cultures, prevoir_volatilite,
-                obtenir_kpi_agriculture, consulter_meteo_region, rafraichir_donnees_climat]
-    risk_tools = [evaluer_risque_financier, segmenter_agriculteurs,
-                  prevoir_volatilite, consulter_meteo_region]
-    kobo_tools = [consulter_donnees_terrain, analyser_collecte_terrain,
-                  generer_formulaire_prix, generer_formulaire_agriculteur]
+                consulter_meteo_region]
+    risk_tools = [prevoir_volatilite, consulter_meteo_region]
+    kobo_tools = []
+    if private_tools_allowed.get():
+        market_tools.append(enregistrer_prevision)
+        ml_tools.extend([obtenir_kpi_agriculture, rafraichir_donnees_climat])
+        risk_tools.extend([evaluer_risque_financier, segmenter_agriculteurs])
+        kobo_tools = [consulter_donnees_terrain, analyser_collecte_terrain,
+                      generer_formulaire_prix, generer_formulaire_agriculteur]
 
     if tool_set == "none":
         return toolkit
@@ -143,19 +148,12 @@ def _get_agent(agent_type: str, model_name: str = None):
     if model_name is None:
         model_name = select_model(agent_type)
 
-    key = f"{agent_type}_{model_name}"
-    if key not in _agents:
-        config = AGENT_CONFIGS.get(agent_type, AGENT_CONFIGS["coordinator"])
-        model, formatter = _create_model(model_name)
-        _agents[key] = ReActAgent(
-            name=f"AgriTogo-{agent_type}",
-            sys_prompt=config["prompt"],
-            model=model,
-            formatter=formatter,
-            memory=InMemoryMemory(),
-            toolkit=_build_toolkit(config["tools"]),
-        )
-    return _agents[key]
+    # Fresh memory and capabilities for every call, never shared across users.
+    config = AGENT_CONFIGS.get(agent_type, AGENT_CONFIGS["coordinator"])
+    model, formatter = _create_model(model_name)
+    return ReActAgent(name=f"AgriTogo-{agent_type}", sys_prompt=config["prompt"],
+                      model=model, formatter=formatter, memory=InMemoryMemory(),
+                      toolkit=_build_toolkit(config["tools"]))
 
 
 async def _call_agent(agent_type: str, question: str, model_name: str = None) -> str:
@@ -178,7 +176,6 @@ async def _call_agent(agent_type: str, question: str, model_name: str = None) ->
                 for _ in range(get_deepseek_keys_count() - 1):
                     rotate_deepseek_key()
                     try:
-                        _agents.pop(f"{agent_type}_{chosen}", None)
                         agent = _get_agent(agent_type, chosen)
                         msg = Msg(name="user", role="user", content=question)
                         response = await agent(msg)
@@ -224,6 +221,8 @@ async def _debate(question: str) -> dict:
 
 async def process_query(question: str, audience: str = "farmer") -> dict:
     """Main entry point for the Decision Intelligence Engine."""
+    if not isinstance(question, str) or not question.strip() or len(question) > 12000:
+        raise ValueError("Invalid question length")
     timestamp = datetime.now().isoformat()
     agent_type = route_query(question)
     model_name = select_model(agent_type)  # auto-selected
@@ -280,12 +279,13 @@ async def process_query(question: str, audience: str = "farmer") -> dict:
         else:
             result["formatted_response"] = "⚠️ Une erreur est survenue. Réessayez dans un instant."
 
-    _memory_store.append(result)
+    if private_tools_allowed.get():
+        _memory_store.append(result)
     return result
 
 
 def get_memory(limit=20):
-    return _memory_store[-limit:]
+    return list(_memory_store)[-max(1, min(limit, 100)): ]
 
 
 def add_feedback(index: int, outcome: str, actual_price: float = None):

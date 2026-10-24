@@ -413,11 +413,12 @@ def save_conversation(role: str, contenu: str, card_number: str = "SYSTEM"):
 
 
 def get_conversations(limit: int = 50, card_number: str = None) -> list[dict]:
-    """Get conversation history."""
+    """Explicit card scope only. Caller must verify the holder first."""
+    if not card_number or card_number == "SYSTEM":
+        return []
     sb = _get_client()
-    query = sb.table("ai_conversations").select("role, content, created_at").order("created_at", desc=True).limit(limit)
-    if card_number:
-        query = query.eq("card_number", card_number)
+    query = sb.table("ai_conversations").select("role, content, created_at").order("created_at", desc=True).limit(max(1, min(limit, 50)))
+    query = query.eq("card_number", card_number)
     res = query.execute()
     return [
         {"role": r["role"], "contenu": r["content"], "timestamp": r["created_at"]}
@@ -427,12 +428,9 @@ def get_conversations(limit: int = 50, card_number: str = None) -> list[dict]:
 
 def clear_conversations(card_number: str = None):
     """Delete conversation history. Requires card_number for safety."""
-    sb = _get_client()
-    if card_number:
-        sb.table("ai_conversations").delete().eq("card_number", card_number).execute()
-    else:
-        # Safety: only clear SYSTEM conversations, never user data without explicit card
-        sb.table("ai_conversations").delete().eq("card_number", "SYSTEM").execute()
+    if not card_number or card_number == "SYSTEM":
+        raise ValueError("An authorized card scope is required")
+    _get_client().table("ai_conversations").delete().eq("card_number", card_number).execute()
 
 
 # ─── Admin: CRUD ──────────────────────────────────────────────────
@@ -456,7 +454,8 @@ def add_prix_from_csv(csv_content: str) -> dict:
     The provenance columns are optional and gracefully fall back on legacy
     deployments where the migration has not yet been applied.
     """
-    import csv, io
+    import csv
+    import io
     reader = csv.DictReader(io.StringIO(csv_content))
     inserted, errors = 0, 0
     cultures_cache = {c["nom"].lower(): c["id"] for c in get_produits()}
@@ -511,7 +510,8 @@ def add_prix_from_csv(csv_content: str) -> dict:
     return {"inserted": inserted, "errors": errors}
 
 def add_produit_from_csv(csv_content: str) -> dict:
-    import csv, io
+    import csv
+    import io
     reader = csv.DictReader(io.StringIO(csv_content))
     inserted, errors = 0, 0
     for row in reader:
@@ -570,7 +570,8 @@ def get_db_stats() -> dict:
 
 def export_prix_csv() -> str:
     """Export all prices as CSV string."""
-    import csv, io
+    import csv
+    import io
     all_prices = get_all_prix(page=1, per_page=10000)
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=["produit", "marche", "prix", "date"])

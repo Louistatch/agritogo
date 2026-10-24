@@ -110,6 +110,7 @@ def forecast_price():
 
 
 @api_bp.route("/risk", methods=["POST"])
+@require_super_admin
 def risk():
     try:
         from app.ml.financial_risk import run_risk_assessment
@@ -120,6 +121,7 @@ def risk():
 
 
 @api_bp.route("/segmentation", methods=["POST"])
+@require_super_admin
 def segmentation():
     try:
         from app.ml.farmer_segmentation import run_farmer_segmentation
@@ -134,6 +136,7 @@ def segmentation():
 
 
 @api_bp.route("/kpi")
+@require_super_admin
 def kpi():
     try:
         from app.ml.kpi_dashboard import get_kpi_data
@@ -391,13 +394,15 @@ def agent_chat():
     import asyncio
     from app.agents.engine import process_query, _AGENTSCOPE_AVAILABLE
 
-    body = request.get_json(force=True, silent=True) or {}
-    message = (body.get("message") or "").strip()
-    card_number = (body.get("card_number") or "").strip()
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("message"), str):
+        return jsonify({"error": "Message texte requis"}), 400
+    message = body["message"].strip()
     audience = body.get("audience", "farmer")
-
-    if not message:
-        return jsonify({"error": "message requis"}), 400
+    if audience not in ("farmer", "cooperative", "expert"):
+        return jsonify({"error": "Audience invalide"}), 400
+    if not message or len(message) > 4000:
+        return jsonify({"error": "Message requis, 4 000 caractères maximum"}), 400
 
     if not _AGENTSCOPE_AVAILABLE:
         return jsonify({
@@ -406,27 +411,7 @@ def agent_chat():
         }), 503
 
     try:
-        # Enrich the question with producer context if card_number provided
-        enriched = message
-        if card_number:
-            try:
-                from app.database import get_prix_historiques, get_latest_prices
-                # Add local context
-                latest = get_latest_prices()
-                if latest:
-                    price_ctx = "; ".join(
-                        f"{p.get('nom', p.get('produit', '?'))}={p.get('prix', 0)}FCFA à {p.get('marche', '?')}"
-                        for p in latest[:8]
-                    )
-                    enriched = (
-                        f"[Carte: {card_number}] "
-                        f"[Prix récents: {price_ctx}] "
-                        f"{message}"
-                    )
-            except Exception as ctx_err:
-                import logging
-                logging.warning(f"[agent_chat] Price context failed: {ctx_err}")
-                enriched = f"[Carte: {card_number}] {message}"
+        enriched = message  # A card number supplied by a caller is not an identity proof.
 
         # Run the multi-agent engine
         loop = asyncio.new_event_loop()
@@ -436,11 +421,7 @@ def agent_chat():
         finally:
             loop.close()
 
-        # Save conversation
-        if card_number:
-            from app.database import save_conversation
-            save_conversation("user", message, card_number)
-            save_conversation("assistant", result.get("formatted_response", ""), card_number)
+        # Authorized persistence belongs to the Next.js facade, never the caller-supplied card.
 
         return jsonify({
             "response": result.get("formatted_response", ""),
