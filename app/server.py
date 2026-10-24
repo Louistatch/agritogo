@@ -8,6 +8,9 @@ import json
 import time
 from flask import Flask, render_template, request, session, Response, stream_with_context
 
+from app.auth_guard import require_super_admin
+from app.session_history import browser_history, session_id
+
 from dotenv import load_dotenv
 load_dotenv(override=False)
 
@@ -26,6 +29,7 @@ if not _secret_key:
         "SECRET_KEY absent : clé aléatoire générée (sessions invalidées au redémarrage)"
     )
 app.secret_key = _secret_key
+app.config.update(MAX_CONTENT_LENGTH=65536, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
 # ── Health check — registered FIRST, responds in <1ms ────────
 @app.route("/health")
@@ -158,6 +162,8 @@ _thought_queues = {}
 
 def get_thought_queue(session_id):
     if session_id not in _thought_queues:
+        if len(_thought_queues) >= 100:
+            _thought_queues.pop(next(iter(_thought_queues)))
         _thought_queues[session_id] = queue.Queue(maxsize=100)
     return _thought_queues[session_id]
 
@@ -178,8 +184,8 @@ def emit_thought(session_id, thought_type, content, agent=None):
 # ── Database + Blueprints — lightweight, load immediately ─────
 from app.database import (
     init_db, get_produits, get_marches,
-    get_prix_historiques, save_conversation, get_conversations,
-    get_latest_prices, clear_conversations,
+    get_prix_historiques,
+    get_latest_prices,
 )
 from app.i18n import get_translations, get_lang_instruction
 from app.admin import admin_bp
@@ -224,7 +230,7 @@ def thoughts_stream():
     Fixed: returns immediately what's in the queue instead of blocking the
     gunicorn sync worker for 30s (which caused WORKER TIMEOUT crashes).
     """
-    sid = session.get("_id", "default")
+    sid = session_id()
     q = get_thought_queue(sid)
 
     # Drain everything currently in the queue, don't block
@@ -260,9 +266,7 @@ def thoughts_stream():
 @app.context_processor
 def inject_i18n():
     lang = session.get("lang", "fr")
-    if "_id" not in session:
-        import uuid
-        session["_id"] = str(uuid.uuid4())[:8]
+    session_id()
     return {"t": get_translations(lang), "lang": lang}
 
 
@@ -271,7 +275,7 @@ def index():
     try:
         produits = get_produits()
         marches = get_marches()
-        conversations = get_conversations()
+        conversations = browser_history.read(session_id())
         latest_prices = get_latest_prices()
         return render_template(
             "index.html",
@@ -283,12 +287,12 @@ def index():
     except Exception as e:
         import traceback
         print(f"[ERROR] / route failed: {traceback.format_exc()}")
-        return f"<pre>Error: {e}\n\n{traceback.format_exc()}</pre>", 500
+        return "Service momentanément indisponible", 503
 
 
 @app.route("/chat/clear", methods=["DELETE"])
 def chat_clear():
-    clear_conversations()
+    browser_history.clear(session_id())
     return '<div class="msg msg-agent"><span class="msg-role">AgriTogo</span><p>Conversation cleared. How can I help?</p></div>'
 
 
@@ -299,17 +303,17 @@ def chat():
         return "<div class='msg msg-agent'><p>⚠️ Agent en cours de chargement, réessayez dans 30 secondes.</p></div>"
     message = request.form.get("message", "").strip()
     model_choice = request.form.get("model", "gemini")
-    if not message:
-        return ""
+    if not message or len(message) > 4000:
+        return "Message requis, 4 000 caractères maximum", 400
     lang = session.get("lang", "fr")
     lang_suffix = get_lang_instruction(lang)
-    sid = session.get("_id", "default")
+    sid = session_id()
     emit_thought(sid, "thinking", f"Processing: {message[:80]}...", "AgriTogo")
-    save_conversation("user", message)
+    browser_history.append(session_id(), "user", message)
     response = run_async(ask_agent(message + lang_suffix, model_choice))
     emit_thought(sid, "done", "Response ready")
-    save_conversation("assistant", response)
-    conversations = get_conversations()
+    browser_history.append(session_id(), "assistant", response)
+    conversations = browser_history.read(session_id())
     return render_template("partials/chat_messages.html", conversations=conversations)
 
 
@@ -333,12 +337,13 @@ def dashboard():
 
 
 @app.route("/ml/interpret", methods=["POST"])
+@require_super_admin
 def ml_interpret():
     """Send ML results to the agent for professional interpretation."""
     module = request.form.get("module", "")
     lang = session.get("lang", "fr")
     lang_suffix = get_lang_instruction(lang)
-    sid = session.get("_id", "default")
+    sid = session_id()
     emit_thought(sid, "thinking", f"Running {module} analysis...", "Quant Agent")
     emit_thought(sid, "tool_call", f"Module: {module}", "Quant Agent")
 
@@ -412,12 +417,8 @@ def ml_interpret():
 
 @app.route("/ml/crop-yield", methods=["POST"])
 def ml_crop_yield():
-    if not run_crop_yield_prediction:
-        _trigger_ml_load()
-        return "<div class='error'>Modèles ML en cours de chargement, réessayez dans quelques secondes.</div>", 503
-    crop = request.form.get("crop", "Mais")
-    result = run_crop_yield_prediction(crop=crop)
-    return render_template("partials/ml_result.html", title=f"Yield Prediction — {crop}", result=result, module="crop_yield")
+    return {"error": "Ancien modèle de rendement expérimental retiré.",
+            "replacement": "/api/v1/yield/estimate"}, 410
 
 
 @app.route("/ml/garch", methods=["POST"])
@@ -430,6 +431,7 @@ def ml_garch():
 
 
 @app.route("/ml/risk", methods=["POST"])
+@require_super_admin
 def ml_risk():
     if not run_risk_assessment:
         return "<div class='error'>Modèles ML en cours de chargement.</div>", 503
@@ -438,6 +440,7 @@ def ml_risk():
 
 
 @app.route("/ml/segmentation", methods=["POST"])
+@require_super_admin
 def ml_segmentation():
     if not run_farmer_segmentation:
         return "<div class='error'>Modèles ML en cours de chargement.</div>", 503
@@ -446,6 +449,7 @@ def ml_segmentation():
 
 
 @app.route("/ml/kpi", methods=["POST"])
+@require_super_admin
 def ml_kpi():
     if not get_kpi_data:
         return "<div class='error'>Modèles ML en cours de chargement.</div>", 503
@@ -462,27 +466,29 @@ def engine_query():
         return "<div class='msg'>⚠️ Engine en cours de chargement, réessayez dans 30 secondes.</div>"
     question = request.form.get("question", "").strip()
     audience = request.form.get("audience", "farmer")
-    if not question:
-        return ""
+    if not question or len(question) > 4000:
+        return "Question requise, 4 000 caractères maximum", 400
     lang = session.get("lang", "fr")
     lang_suffix = get_lang_instruction(lang)
-    sid = session.get("_id", "default")
+    sid = session_id()
     emit_thought(sid, "thinking", f"Routing query to specialized agents...", "Coordinator")
     result = run_async(process_query(question + lang_suffix, audience))
     emit_thought(sid, "decision", result.get("formatted_response", "")[:120] + "...", "Decision Agent")
     emit_thought(sid, "done", "Analysis complete")
-    save_conversation("user", question)
-    save_conversation("assistant", result.get("formatted_response", ""))
+    browser_history.append(session_id(), "user", question)
+    browser_history.append(session_id(), "assistant", result.get("formatted_response", ""))
     return render_template("partials/engine_result.html", result=result)
 
 
 @app.route("/engine/memory")
+@require_super_admin
 def engine_memory():
     memory = get_memory(20)
     return render_template("partials/engine_memory.html", memory=memory)
 
 
 @app.route("/engine/feedback", methods=["POST"])
+@require_super_admin
 def engine_feedback():
     idx = int(request.form.get("index", 0))
     outcome = request.form.get("outcome", "")

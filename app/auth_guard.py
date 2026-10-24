@@ -25,6 +25,7 @@ from flask import jsonify, request
 # app/database.py expose get_db(), pas get_client() : ce dernier vit dans
 # app/haroo/database.py. Depuis ce module-ci, `.database` résout vers le premier.
 from .database import get_db
+from .security_context import private_tools_allowed
 
 
 def _bearer_token() -> str | None:
@@ -51,7 +52,8 @@ def _user_id_from_token(token: str) -> str | None:
         return None
     if not res.ok:
         return None
-    return (res.json() or {}).get("id")
+    data = res.json() or {}
+    return None if data.get("is_anonymous") else data.get("id")
 
 
 def require_super_admin(fn):
@@ -73,6 +75,7 @@ def require_super_admin(fn):
                 .table("profiles")
                 .select("role")
                 .eq("id", user_id)
+                .is_("deleted_at", "null")
                 .limit(1)
                 .execute()
             )
@@ -83,6 +86,10 @@ def require_super_admin(fn):
         if not rows or rows[0].get("role") != "super_admin":
             return jsonify({"error": "Réservé à l'administration"}), 403
 
-        return fn(*args, **kwargs)
+        capability = private_tools_allowed.set(True)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            private_tools_allowed.reset(capability)
 
     return wrapper
