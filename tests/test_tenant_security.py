@@ -67,12 +67,14 @@ def test_supplied_card_is_not_used_to_write_conversations(server, monkeypatch):
 def test_cache_is_bounded_expires_and_copies_results():
     now = [0]
     history = SessionHistory(capacity=2, max_messages=2, ttl=10, clock=lambda: now[0])
-    for text in ('a1','a2','a3'): history.append('A','user',text)
+    for text in ('a1','a2','a3'):
+        history.append('A','user',text)
     snapshot = history.read('A')
     assert [r['contenu'] for r in snapshot] == ['a2','a3']
     snapshot[0]['contenu'] = 'mutated'
     assert history.read('A')[0]['contenu'] == 'a2'
-    history.append('B','user','b'); history.append('C','user','c')
+    history.append('B','user','b')
+    history.append('C','user','c')
     assert history.read('A') == []
     now[0] = 11
     assert history.read('B') == []
@@ -81,7 +83,8 @@ def test_database_history_fails_closed_without_verified_scope(server, monkeypatc
     database = importlib.import_module('app.database')
     monkeypatch.setattr(database, '_get_client', lambda: pytest.fail('Unscoped database access'))
     assert database.get_conversations() == []
-    with pytest.raises(ValueError): database.clear_conversations()
+    with pytest.raises(ValueError):
+        database.clear_conversations()
 
 def test_verified_admin_capability_is_reset_after_call(server, monkeypatch):
     guard = importlib.import_module('app.auth_guard')
@@ -130,5 +133,7 @@ def test_agents_have_fresh_memory_and_public_toolkit(server, monkeypatch):
     assert not set(names['app.kobo_tools']) & set(a['toolkit'].names)
     assert not {'evaluer_risque_financier','segmenter_agriculteurs','enregistrer_prevision'} & set(a['toolkit'].names)
     capability=private_tools_allowed.set(True)
-    try: assert 'consulter_donnees_terrain' in engine._get_agent('coordinator')['toolkit'].names
-    finally: private_tools_allowed.reset(capability)
+    try:
+        assert 'consulter_donnees_terrain' in engine._get_agent('coordinator')['toolkit'].names
+    finally:
+        private_tools_allowed.reset(capability)

@@ -454,7 +454,8 @@ def add_prix_from_csv(csv_content: str) -> dict:
     The provenance columns are optional and gracefully fall back on legacy
     deployments where the migration has not yet been applied.
     """
-    import csv, io
+    import csv
+    import io
     reader = csv.DictReader(io.StringIO(csv_content))
     inserted, errors = 0, 0
     cultures_cache = {c["nom"].lower(): c["id"] for c in get_produits()}
@@ -509,7 +510,8 @@ def add_prix_from_csv(csv_content: str) -> dict:
     return {"inserted": inserted, "errors": errors}
 
 def add_produit_from_csv(csv_content: str) -> dict:
-    import csv, io
+    import csv
+    import io
     reader = csv.DictReader(io.StringIO(csv_content))
     inserted, errors = 0, 0
     for row in reader:
@@ -568,7 +570,8 @@ def get_db_stats() -> dict:
 
 def export_prix_csv() -> str:
     """Export all prices as CSV string."""
-    import csv, io
+    import csv
+    import io
     all_prices = get_all_prix(page=1, per_page=10000)
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=["produit", "marche", "prix", "date"])

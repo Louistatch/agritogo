@@ -182,14 +182,14 @@ def emit_thought(session_id, thought_type, content, agent=None):
 
 
 # ── Database + Blueprints — lightweight, load immediately ─────
-from app.database import (
+from app.database import (  # noqa: E402 - lightweight imports after early health setup
     init_db, get_produits, get_marches,
     get_prix_historiques,
     get_latest_prices,
 )
-from app.i18n import get_translations, get_lang_instruction
-from app.admin import admin_bp
-from app.api import api_bp
+from app.i18n import get_translations, get_lang_instruction  # noqa: E402
+from app.admin import admin_bp  # noqa: E402 - register after Flask initialization
+from app.api import api_bp  # noqa: E402
 
 app.register_blueprint(admin_bp)
 app.register_blueprint(api_bp)
